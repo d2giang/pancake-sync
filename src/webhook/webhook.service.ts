@@ -248,6 +248,7 @@ export class WebhookService {
     if (event.message) return 'message';
     if (event.postback) return 'postback';
     if (event.referral) return 'referral';
+    if (event.optin) return 'optin';
     if (event.read) return 'read';
     if (event.delivery) return 'delivery';
 
@@ -255,12 +256,23 @@ export class WebhookService {
   }
 
   extractRef(event: any): string | null {
-    return (
+    const directRef =
       event?.postback?.referral?.ref ||
       event?.referral?.ref ||
       event?.message?.referral?.ref ||
-      null
-    );
+      event?.optin?.ref ||
+      null;
+
+    if (directRef) return String(directRef);
+
+    const postbackPayload = event?.postback?.payload;
+
+    if (typeof postbackPayload === 'string' && postbackPayload) {
+      const match = postbackPayload.match(/(?:^|[?&])ref=([^&]+)/);
+      if (match?.[1]) return decodeURIComponent(match[1]);
+    }
+
+    return null;
   }
 
   isEchoMessage(event: any): boolean {
@@ -285,11 +297,30 @@ export class WebhookService {
     const conversationId = this.buildConversationId(pageId, userId);
 
     if (ref && pageId && userId) {
+      this.logLine('Meta ref captured', {
+        event_type: eventType,
+        conversation_id: conversationId,
+        page_id: pageId,
+        sender_id: userId,
+        ref,
+      });
+
       await this.handleRefCapture(pageId, userId, ref);
     }
 
     if (this.isUserMessage(event) && pageId && userId) {
       await this.retryPendingRefSync(conversationId);
+    }
+
+    if (!ref && eventType !== 'message') {
+      this.logLine('Meta event received without ref', {
+        event_type: eventType,
+        conversation_id: conversationId,
+        has_postback_referral: !!event?.postback?.referral,
+        has_referral: !!event?.referral,
+        has_message_referral: !!event?.message?.referral,
+        has_optin: !!event?.optin,
+      });
     }
   }
 
