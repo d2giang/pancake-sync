@@ -43,7 +43,11 @@ export class WebhookService {
     if (!secret) return true;
 
     if (!header || !header.startsWith('sha256=')) {
-      this.logLine('Missing or invalid X-Hub-Signature-256 header', {}, 'ERROR');
+      this.logLine(
+        'Missing or invalid X-Hub-Signature-256 header',
+        {},
+        'ERROR',
+      );
       return false;
     }
 
@@ -83,11 +87,7 @@ export class WebhookService {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify(data, null, 2),
-      'utf8',
-    );
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
   }
 
   loadPendingRefs(): Record<string, any> {
@@ -255,7 +255,8 @@ export class WebhookService {
   }
 
   private pancakeUrl(apiPath: string, query: Record<string, any> = {}) {
-    const baseUrl = process.env.PANCAKE_BASE_URL || 'https://crm.pancake.vn/api';
+    const baseUrl =
+      process.env.PANCAKE_BASE_URL || 'https://crm.pancake.vn/api';
 
     query.api_key = process.env.PANCAKE_API_KEY;
 
@@ -286,21 +287,29 @@ export class WebhookService {
       );
 
       if (result.data?.success === false) {
-        this.logLine('Pancake update lead ref failed', {
-          record_id: recordId,
-          raw: result.data,
-        }, 'ERROR');
+        this.logLine(
+          'Pancake update lead ref failed',
+          {
+            record_id: recordId,
+            raw: result.data,
+          },
+          'ERROR',
+        );
 
         return false;
       }
 
       return true;
     } catch (error: any) {
-      this.logLine('Pancake update lead ref failed', {
-        record_id: recordId,
-        message: error.message,
-        response: error.response?.data,
-      }, 'ERROR');
+      this.logLine(
+        'Pancake update lead ref failed',
+        {
+          record_id: recordId,
+          message: error.message,
+          response: error.response?.data,
+        },
+        'ERROR',
+      );
 
       return false;
     }
@@ -350,14 +359,21 @@ export class WebhookService {
       }
     } catch {}
 
-    this.logLine('Lead not found in Pancake', {
-      conversation_id: conversationId,
-    }, 'ERROR');
+    this.logLine(
+      'Lead not found in Pancake',
+      {
+        conversation_id: conversationId,
+      },
+      'ERROR',
+    );
 
     return null;
   }
 
-  async syncRefToPancake(conversationId: string, ref: string): Promise<boolean> {
+  async syncRefToPancake(
+    conversationId: string,
+    ref: string,
+  ): Promise<boolean> {
     let recordId = this.getLeadRecordId(conversationId);
 
     if (!recordId) {
@@ -365,10 +381,14 @@ export class WebhookService {
     }
 
     if (!recordId) {
-      this.logLine('Cannot sync ref because record id not found', {
-        conversation_id: conversationId,
-        ref,
-      }, 'ERROR');
+      this.logLine(
+        'Cannot sync ref because record id not found',
+        {
+          conversation_id: conversationId,
+          ref,
+        },
+        'ERROR',
+      );
 
       return false;
     }
@@ -426,10 +446,12 @@ export class WebhookService {
   async handlePancakeWebhook(data: any) {
     if (this.isPancakeCreatedRecord(data)) {
       const record = this.extractPancakeRecordData(data);
+      const receivedAt = new Date().toISOString();
 
       if (Object.keys(record).length > 0) {
         this.logPancakeNewRecord(record);
         this.savePancakeRecord(record);
+        await this.forwardToLaravel(record, receivedAt);
       }
     }
 
@@ -530,6 +552,96 @@ export class WebhookService {
 
     if (changed) {
       this.writeJsonFile(filePath, records);
+    }
+  }
+
+  private mapPancakeRecordForLaravel(record: any, receivedAt?: string) {
+    const customer = record.pancake_customer_obj ?? null;
+
+    return {
+      event: 'pancake.lead.created',
+      source: 'pancake',
+      received_at: receivedAt ?? new Date().toISOString(),
+
+      lead: {
+        pancake_id: record.id ?? null,
+        workspace_id: record.workspace_id ?? null,
+        table_id: record.table_id ?? null,
+
+        name: record.name ?? null,
+        phone_number: record.phone_number ?? null,
+        email: record.email ?? null,
+        status: record.status ?? null,
+        gender: record.gender ?? null,
+
+        conversation_id: record.conversation_id ?? null,
+        page_id: record.page_id ?? customer?.page_id ?? null,
+        facebook_id: record.facebookid ?? customer?.fb_id ?? null,
+        ref: record.ref ?? null,
+        conversation_source: record.conversation_source ?? null,
+
+        created_on: record.created_on ?? null,
+        modified_on: record.modified_on ?? null,
+      },
+
+      customer: customer
+        ? {
+            id: record.pancake_customer ?? customer.id ?? null,
+            customer_id: customer.customer_id ?? null,
+            name: customer.name ?? null,
+            page_id: customer.page_id ?? null,
+            fb_id: customer.fb_id ?? null,
+            psid: customer.psid ?? null,
+            phone_numbers: customer.phone_numbers ?? [],
+          }
+        : null,
+
+      utm: {
+        utm_source: record.utm_source ?? null,
+        utm_medium: record.utm_medium ?? null,
+        utm_campaign: record.utm_campaign ?? null,
+        utm_term: record.utm_term ?? null,
+        utm_content: record.utm_content ?? null,
+        utm_id: record.utm_id ?? null,
+      },
+
+      raw_data: record,
+    };
+  }
+
+  async forwardToLaravel(record: any, receivedAt?: string) {
+    const url = process.env.LARAVEL_WEBHOOK_URL;
+
+    if (!url) {
+      this.logLine('Laravel webhook URL is empty, skip forward', {}, 'DEBUG');
+      return;
+    }
+
+    const payload = this.mapPancakeRecordForLaravel(record, receivedAt);
+
+    try {
+      await axios.post(url, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Secret': process.env.LARAVEL_WEBHOOK_SECRET || '',
+        },
+        timeout: 10000,
+      });
+
+      this.logLine('Forwarded Pancake record to Laravel', {
+        pancake_id: record.id ?? null,
+        url,
+      });
+    } catch (error: any) {
+      this.logLine(
+        'Forward Pancake record to Laravel failed',
+        {
+          pancake_id: record.id ?? null,
+          message: error.message,
+          response: error.response?.data,
+        },
+        'ERROR',
+      );
     }
   }
 }
