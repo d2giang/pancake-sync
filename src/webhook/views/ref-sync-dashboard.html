@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Ref Sync Dashboard</title>
+    <style>
+      {{css}}
+    </style>
+  </head>
+  <body>
+    <h1>Ref Sync Dashboard</h1>
+    {{message}}
+
+    <div class="box">
+      <a
+        class="btn"
+        href="?ref_sync=1&action=sync_all"
+        onclick="return confirm('Dong bo tat ca pending refs?');"
+      >
+        Dong bo tat ca
+      </a>
+      <a class="btn" href="?ref_sync=1">Refresh</a>
+    </div>
+
+    <h2>Pending refs</h2>
+    <table>
+      <tr>
+        <th>Conversation ID</th>
+        <th>Ref</th>
+        <th>Page ID</th>
+        <th>Sender ID</th>
+        <th>Captured At</th>
+        <th>Record ID</th>
+        <th>Status</th>
+        <th>Action</th>
+      </tr>
+      {{rows}}
+    </table>
+
+    <h2>Lead index</h2>
+    <div class="box">Tong lead index: {{leadIndexCount}}</div>
+
+    <h2>Log gan nhat</h2>
+    <pre>{{logs}}</pre>
+  </body>
+</html>

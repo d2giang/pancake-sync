@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Query,
-  Req,
-  Res,
-} from '@nestjs/common';
+import { Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { WebhookService } from './webhook.service';
 
@@ -14,24 +7,21 @@ export class WebhookController {
   constructor(private readonly service: WebhookService) {}
 
   @Get()
-  handleGet(
-    @Query() query: any,
-    @Res() res: Response,
-  ) {
+  async handleGet(@Query() query: any, @Res() res: Response) {
+    if (query.ref_sync !== undefined) {
+      const html = await this.service.renderRefSyncDashboard(query);
+      return res.status(200).type('text/html; charset=utf-8').send(html);
+    }
+
     if (query.records !== undefined) {
-      return res.json(
-        this.service.getPancakeRecords(Number(query.page || 1)),
-      );
+      return res.json(this.service.getPancakeRecords(Number(query.page || 1)));
     }
 
     const mode = query['hub.mode'] || query.hub_mode;
     const token = query['hub.verify_token'] || query.hub_verify_token;
     const challenge = query['hub.challenge'] || query.hub_challenge;
 
-    if (
-      mode === 'subscribe' &&
-      token === process.env.META_VERIFY_TOKEN
-    ) {
+    if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
       return res
         .status(200)
         .type('text/plain')

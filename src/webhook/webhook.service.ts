@@ -11,6 +11,12 @@ export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
 
   private readonly baseDataPath = path.join(process.cwd(), 'data', 'webhook');
+  private readonly logMaxSize = 2 * 1024 * 1024;
+  private readonly logKeepLastLines = 300;
+
+  private logFilePath() {
+    return path.join(this.baseDataPath, 'messenger_webhook.log');
+  }
 
   private pendingRefsPath() {
     return path.join(this.baseDataPath, 'pending_refs.json');
@@ -24,10 +30,67 @@ export class WebhookService {
     return path.join(this.baseDataPath, 'pancake-records.json');
   }
 
+  private viewPath(fileName: string) {
+    return path.join(__dirname, 'views', fileName);
+  }
+
+  private readViewFile(fileName: string): string {
+    return fs.readFileSync(this.viewPath(fileName), 'utf8');
+  }
+
+  private renderTemplate(template: string, data: Record<string, string>) {
+    return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+      return data[key] ?? '';
+    });
+  }
+
+  private truncateLogIfNeeded() {
+    const filePath = this.logFilePath();
+
+    if (!fs.existsSync(filePath)) return;
+
+    const stat = fs.statSync(filePath);
+    if (stat.size < this.logMaxSize) return;
+
+    try {
+      const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+      const tail = lines.slice(-this.logKeepLastLines).join('\n');
+      fs.writeFileSync(filePath, tail.endsWith('\n') ? tail : `${tail}\n`);
+    } catch {
+      fs.writeFileSync(filePath, '', 'utf8');
+    }
+  }
+
   logLine(message: string, context: any = {}, level: LogLevel = 'IMPORTANT') {
     const debugLog = process.env.WEBHOOK_DEBUG_LOG === 'true';
 
     if (level === 'DEBUG' && !debugLog) return;
+
+    if (
+      !['IMPORTANT', 'ERROR'].includes(level) &&
+      !(level === 'DEBUG' && debugLog)
+    ) {
+      return;
+    }
+
+    const dir = path.dirname(this.logFilePath());
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    this.truncateLogIfNeeded();
+
+    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const safeContext =
+      context && Object.keys(context).length > 0
+        ? ` ${JSON.stringify(context)}`
+        : '';
+
+    fs.appendFileSync(
+      this.logFilePath(),
+      `[${timestamp}][${level}] ${message}${safeContext}\n`,
+      'utf8',
+    );
 
     if (level === 'ERROR') {
       this.logger.error(message, JSON.stringify(context));
@@ -55,6 +118,11 @@ export class WebhookService {
       'sha256=' +
       crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
 
+    if (Buffer.byteLength(expected) !== Buffer.byteLength(header)) {
+      this.logLine('Signature validation failed', {}, 'ERROR');
+      return false;
+    }
+
     const valid = crypto.timingSafeEqual(
       Buffer.from(expected),
       Buffer.from(header),
@@ -68,7 +136,7 @@ export class WebhookService {
   }
 
   private readJsonFile(filePath: string): any {
-    if (!fs.existsSync(filePath)) return Array.isArray(filePath) ? [] : {};
+    if (!fs.existsSync(filePath)) return {};
 
     try {
       const raw = fs.readFileSync(filePath, 'utf8');
@@ -643,5 +711,117 @@ export class WebhookService {
         'ERROR',
       );
     }
+  }
+
+  getLogTail(lines = 80): string[] {
+    const filePath = this.logFilePath();
+
+    if (!fs.existsSync(filePath)) return [];
+
+    try {
+      const content = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+      return content.filter(Boolean).slice(-lines);
+    } catch {
+      return [];
+    }
+  }
+
+  private escapeHtml(value: any): string {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  async renderRefSyncDashboard(query: any): Promise<string> {
+    let message: string | null = null;
+
+    if (query?.action === 'sync_one') {
+      const conversationId = String(query.conversation_id || '');
+
+      if (conversationId) {
+        const pending = this.getPendingRef(conversationId);
+
+        if (pending?.ref) {
+          const ok = await this.syncRefToPancake(
+            conversationId,
+            String(pending.ref),
+          );
+
+          if (ok) {
+            this.removePendingRef(conversationId);
+            message = `Dong bo thanh cong: ${conversationId}`;
+          } else {
+            message = `Dong bo that bai: ${conversationId}`;
+          }
+        } else {
+          message = `Khong tim thay pending ref cho: ${conversationId}`;
+        }
+      }
+    }
+
+    if (query?.action === 'sync_all') {
+      const pendingRefs = this.loadPendingRefs();
+      let success = 0;
+      let failed = 0;
+
+      for (const [conversationId, row] of Object.entries(pendingRefs)) {
+        if (!row || typeof row !== 'object' || !(row as any).ref) continue;
+
+        const ok = await this.syncRefToPancake(
+          conversationId,
+          String((row as any).ref),
+        );
+
+        if (ok) {
+          this.removePendingRef(conversationId);
+          success++;
+        } else {
+          failed++;
+        }
+      }
+
+      message = `Dong bo tat ca xong. Thanh cong: ${success}, loi: ${failed}`;
+    }
+
+    const pendingRefs = this.loadPendingRefs();
+    const leadIndex = this.loadLeadIndex();
+    const logs = this.getLogTail(100);
+
+    const rows =
+      Object.entries(pendingRefs)
+        .filter(([, row]) => row && typeof row === 'object')
+        .map(([conversationId, row]: [string, any]) => {
+          const ref = String(row.ref || '');
+          const recordId = leadIndex?.[conversationId]?.record_id || null;
+          const syncUrl = `?ref_sync=1&action=sync_one&conversation_id=${encodeURIComponent(
+            conversationId,
+          )}`;
+
+          return `<tr>
+            <td>${this.escapeHtml(conversationId)}</td>
+            <td>${this.escapeHtml(ref)}</td>
+            <td>${this.escapeHtml(row.page_id || '')}</td>
+            <td>${this.escapeHtml(row.sender_id || '')}</td>
+            <td>${this.escapeHtml(row.captured_at || '')}</td>
+            <td>${this.escapeHtml(recordId || 'Chua co')}</td>
+            ${recordId ? '<td class="ok">Co record_id</td>' : '<td class="bad">Chua tim thay record_id</td>'}
+            <td><a class="btn" href="${syncUrl}">Dong bo lai</a></td>
+          </tr>`;
+        })
+        .join('') ||
+      '<tr><td colspan="8" class="ok">Khong con pending ref nao</td></tr>';
+
+    return this.renderTemplate(this.readViewFile('ref-sync-dashboard.html'), {
+      css: this.readViewFile('ref-sync-dashboard.css'),
+      message: message
+        ? `<div class="box"><b>${this.escapeHtml(message)}</b></div>`
+        : '',
+      rows,
+      leadIndexCount: String(Object.keys(leadIndex).length),
+      logs: logs.map((line) => this.escapeHtml(line)).join('\n'),
+    });
   }
 }
