@@ -548,6 +548,7 @@ export class WebhookService {
       const receivedAt = new Date().toISOString();
 
       if (Object.keys(record).length > 0) {
+        await this.applyPendingRefToPancakeRecord(record);
         this.logPancakeNewRecord(record);
         this.savePancakeRecord(record);
         await this.forwardToLaravel(record, receivedAt);
@@ -571,6 +572,30 @@ export class WebhookService {
 
     this.setLeadIndex(conversationId, recordId);
     await this.retryPendingRefSync(conversationId);
+  }
+
+  private async applyPendingRefToPancakeRecord(record: any) {
+    const workspaceId = Number(record.workspace_id || 0);
+    const tableId = String(record.table_id || '');
+    const conversationId = String(record.conversation_id || '');
+    const recordId = String(record.id || '');
+
+    if (workspaceId !== Number(process.env.PANCAKE_WORKSPACE || 607)) return;
+    if (tableId !== String(process.env.PANCAKE_TABLE || 'lead')) return;
+    if (!conversationId || !recordId) return;
+
+    this.setLeadIndex(conversationId, recordId);
+
+    const pending = this.getPendingRef(conversationId);
+    if (!pending?.ref) return;
+
+    const ref = String(pending.ref);
+    record.ref = ref;
+
+    const ok = await this.syncRefToPancake(conversationId, ref);
+    if (ok) {
+      this.removePendingRef(conversationId);
+    }
   }
 
   savePancakeRecord(record: any) {
