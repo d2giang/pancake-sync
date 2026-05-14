@@ -1,0 +1,98 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { WebhookService } from './webhook.service';
+
+@Controller('api/webhook')
+export class WebhookController {
+  constructor(private readonly service: WebhookService) {}
+
+  @Get()
+  handleGet(
+    @Query() query: any,
+    @Res() res: Response,
+  ) {
+    if (query.records !== undefined) {
+      return res.json(
+        this.service.getPancakeRecords(Number(query.page || 1)),
+      );
+    }
+
+    const mode = query['hub.mode'] || query.hub_mode;
+    const token = query['hub.verify_token'] || query.hub_verify_token;
+    const challenge = query['hub.challenge'] || query.hub_challenge;
+
+    if (
+      mode === 'subscribe' &&
+      token === process.env.META_VERIFY_TOKEN
+    ) {
+      return res
+        .status(200)
+        .type('text/plain')
+        .send(String(challenge || ''));
+    }
+
+    return res.status(403).type('text/plain').send('Forbidden');
+  }
+
+  @Post()
+  async handlePost(
+    @Req() req: Request & { rawBody?: string },
+    @Res() res: Response,
+  ) {
+    try {
+      const rawBody = req.rawBody || JSON.stringify(req.body || {});
+      const data = req.body;
+
+      if (!data || typeof data !== 'object') {
+        this.service.logLine('Invalid JSON payload', {}, 'ERROR');
+        return res.status(400).type('text/plain').send('Bad Request');
+      }
+
+      this.service.cleanOldPendingRefs();
+
+      if (
+        this.service.isPancakePayload(data) ||
+        this.service.isPancakeCreatedRecord(data)
+      ) {
+        await this.service.handlePancakeWebhook(data);
+        return res.status(200).type('text/plain').send('EVENT_RECEIVED');
+      }
+
+      if (data.object === 'page') {
+        const signature = req.header('x-hub-signature-256') || '';
+
+        if (!this.service.verifySignature(rawBody, signature)) {
+          return res.status(403).type('text/plain').send('Invalid signature');
+        }
+
+        for (const entry of data.entry || []) {
+          for (const event of entry.messaging || []) {
+            await this.service.processMessagingEvent(event);
+          }
+        }
+
+        return res.status(200).type('text/plain').send('EVENT_RECEIVED');
+      }
+
+      return res.status(200).type('text/plain').send('EVENT_RECEIVED');
+    } catch (error: any) {
+      this.service.logLine(
+        'Unhandled exception',
+        {
+          message: error.message,
+          stack: error.stack,
+        },
+        'ERROR',
+      );
+
+      return res.status(500).type('text/plain').send('Internal Server Error');
+    }
+  }
+}
