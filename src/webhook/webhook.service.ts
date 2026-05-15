@@ -529,13 +529,19 @@ export class WebhookService {
   }
 
   extractPancakeRecordData(payload: any): any {
-    if (payload?.event === 'record' && payload?.action === 'created') {
+    if (
+      payload?.event === 'record' &&
+      ['created', 'updated'].includes(payload?.action)
+    ) {
       return payload?.data && typeof payload.data === 'object'
         ? payload.data
         : {};
     }
 
-    if (payload?.type === 'records' && payload?.event_type === 'insert') {
+    if (
+      payload?.type === 'records' &&
+      ['insert', 'update'].includes(payload?.event_type)
+    ) {
       return payload;
     }
 
@@ -543,15 +549,23 @@ export class WebhookService {
   }
 
   async handlePancakeWebhook(data: any) {
-    if (this.isPancakeCreatedRecord(data)) {
+    const isCreated = this.isPancakeCreatedRecord(data);
+    const isUpdated = this.isPancakeUpdatedRecord(data);
+
+    if (isCreated || isUpdated) {
       const record = this.extractPancakeRecordData(data);
       const receivedAt = new Date().toISOString();
+      const action = isUpdated ? 'updated' : 'created';
 
       if (Object.keys(record).length > 0) {
         await this.applyPendingRefToPancakeRecord(record);
-        this.logPancakeNewRecord(record);
+
+        if (isCreated) {
+          this.logPancakeNewRecord(record);
+        }
+
         this.savePancakeRecord(record);
-        await this.forwardToLaravel(record, receivedAt);
+        await this.forwardToLaravel(record, receivedAt, action);
       }
     }
 
@@ -678,12 +692,18 @@ export class WebhookService {
       this.writeJsonFile(filePath, records);
     }
   }
-
-  private mapPancakeRecordForLaravel(record: any, receivedAt?: string) {
+  private mapPancakeRecordForLaravel(
+    record: any,
+    receivedAt?: string,
+    action: 'created' | 'updated' = 'created',
+  ) {
     const customer = record.pancake_customer_obj ?? null;
 
     return {
-      event: 'pancake.lead.created',
+      event:
+        action === 'updated' ? 'pancake.lead.updated' : 'pancake.lead.created',
+
+      action,
       source: 'pancake',
       received_at: receivedAt ?? new Date().toISOString(),
 
@@ -733,7 +753,11 @@ export class WebhookService {
     };
   }
 
-  async forwardToLaravel(record: any, receivedAt?: string) {
+  async forwardToLaravel(
+    record: any,
+    receivedAt?: string,
+    action: 'created' | 'updated' = 'created',
+  ) {
     const url = process.env.LARAVEL_WEBHOOK_URL;
 
     if (!url) {
@@ -741,7 +765,7 @@ export class WebhookService {
       return;
     }
 
-    const payload = this.mapPancakeRecordForLaravel(record, receivedAt);
+    const payload = this.mapPancakeRecordForLaravel(record, receivedAt, action);
 
     try {
       await axios.post(url, payload, {
@@ -754,6 +778,7 @@ export class WebhookService {
 
       this.logLine('Forwarded Pancake record to Laravel', {
         pancake_id: record.id ?? null,
+        action,
         url,
       });
     } catch (error: any) {
@@ -761,6 +786,7 @@ export class WebhookService {
         'Forward Pancake record to Laravel failed',
         {
           pancake_id: record.id ?? null,
+          action,
           message: error.message,
           response: error.response?.data,
         },
@@ -879,5 +905,17 @@ export class WebhookService {
       leadIndexCount: String(Object.keys(leadIndex).length),
       logs: logs.map((line) => this.escapeHtml(line)).join('\n'),
     });
+  }
+
+  isPancakeUpdatedRecord(payload: any): boolean {
+    if (payload?.event === 'record' && payload?.action === 'updated') {
+      return true;
+    }
+
+    if (payload?.type === 'records' && payload?.event_type === 'update') {
+      return true;
+    }
+
+    return false;
   }
 }
