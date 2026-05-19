@@ -77,13 +77,19 @@ export class WebhookController {
           entries: Array.isArray(data.entry) ? data.entry.length : 0,
           events: (data.entry || []).reduce(
             (total: number, entry: any) =>
-              total + (Array.isArray(entry.messaging) ? entry.messaging.length : 0),
+              total +
+              (Array.isArray(entry.messaging) ? entry.messaging.length : 0) +
+              (Array.isArray(entry.standby) ? entry.standby.length : 0),
             0,
           ),
         });
 
         for (const entry of data.entry || []) {
           for (const event of entry.messaging || []) {
+            await this.service.processMessagingEvent(event);
+          }
+
+          for (const event of entry.standby || []) {
             await this.service.processMessagingEvent(event);
           }
         }

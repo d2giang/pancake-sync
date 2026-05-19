@@ -330,6 +330,23 @@ export class WebhookService {
     const userId = senderId;
     const conversationId = this.buildConversationId(pageId, userId);
 
+    this.logLine('Meta event processed', {
+      event_type: eventType,
+      conversation_id: conversationId,
+      page_id: pageId || null,
+      sender_id: userId || null,
+      has_ref: !!ref,
+      has_postback: !!event?.postback,
+      postback_payload: event?.postback?.payload || null,
+      has_quick_reply: !!event?.message?.quick_reply,
+      quick_reply_payload: event?.message?.quick_reply?.payload || null,
+      has_message_text: !!event?.message?.text,
+      has_referral: !!event?.referral,
+      has_postback_referral: !!event?.postback?.referral,
+      has_message_referral: !!event?.message?.referral,
+      has_optin: !!event?.optin,
+    });
+
     if (ref && pageId && userId) {
       this.logLine('Meta ref captured', {
         event_type: eventType,
