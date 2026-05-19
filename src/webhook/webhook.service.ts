@@ -255,24 +255,48 @@ export class WebhookService {
     return 'unknown';
   }
 
+  private extractRefFromPayload(payload: any): string | null {
+    if (!payload) return null;
+
+    if (typeof payload === 'object') {
+      const ref = payload.ref || payload.referral_ref || payload.utm_ref;
+      return ref ? String(ref) : null;
+    }
+
+    if (typeof payload !== 'string') return null;
+
+    const trimmedPayload = payload.trim();
+    if (!trimmedPayload) return null;
+
+    try {
+      const parsed = JSON.parse(trimmedPayload);
+      const ref = parsed?.ref || parsed?.referral_ref || parsed?.utm_ref;
+      if (ref) return String(ref);
+    } catch {}
+
+    const match = trimmedPayload.match(/(?:^|[?&])ref=([^&]+)/);
+    if (match?.[1]) return decodeURIComponent(match[1]);
+
+    return null;
+  }
+
   extractRef(event: any): string | null {
     const directRef =
       event?.postback?.referral?.ref ||
       event?.referral?.ref ||
       event?.message?.referral?.ref ||
       event?.optin?.ref ||
+      event?.message?.quick_reply?.ref ||
       null;
 
     if (directRef) return String(directRef);
 
-    const postbackPayload = event?.postback?.payload;
-
-    if (typeof postbackPayload === 'string' && postbackPayload) {
-      const match = postbackPayload.match(/(?:^|[?&])ref=([^&]+)/);
-      if (match?.[1]) return decodeURIComponent(match[1]);
-    }
-
-    return null;
+    return (
+      this.extractRefFromPayload(event?.postback?.payload) ||
+      this.extractRefFromPayload(event?.message?.quick_reply?.payload) ||
+      this.extractRefFromPayload(event?.optin?.payload) ||
+      null
+    );
   }
 
   isEchoMessage(event: any): boolean {
@@ -281,6 +305,14 @@ export class WebhookService {
 
   isUserMessage(event: any): boolean {
     return !!event?.message?.text && !event?.message?.is_echo;
+  }
+
+  isUserInteractionEvent(event: any, eventType: string): boolean {
+    if (this.isEchoMessage(event)) return false;
+    if (this.isUserMessage(event)) return true;
+    if (event?.message?.quick_reply?.payload) return true;
+
+    return ['postback', 'referral', 'optin'].includes(eventType);
   }
 
   async processMessagingEvent(event: any) {
@@ -308,7 +340,7 @@ export class WebhookService {
       await this.handleRefCapture(pageId, userId, ref);
     }
 
-    if (this.isUserMessage(event) && pageId && userId) {
+    if (this.isUserInteractionEvent(event, eventType) && pageId && userId) {
       await this.retryPendingRefSync(conversationId);
     }
 
