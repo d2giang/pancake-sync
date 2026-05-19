@@ -301,6 +301,170 @@ export class WebhookService {
     );
   }
 
+  private firstStringValue(values: any[]): string | null {
+    for (const value of values) {
+      if (value === undefined || value === null) continue;
+
+      const text = String(value).trim();
+      if (text) return text;
+    }
+
+    return null;
+  }
+
+  private extractRefFromUrl(value: any): string | null {
+    if (typeof value !== 'string' || !value.trim()) return null;
+
+    try {
+      const parsed = new URL(value);
+      const ref =
+        parsed.searchParams.get('ref') ||
+        parsed.searchParams.get('referral_ref') ||
+        parsed.searchParams.get('utm_ref');
+
+      return ref ? String(ref) : null;
+    } catch {
+      const match = value.match(/(?:^|[?&#|\s])ref=([^&|#\s]+)/i);
+      return match?.[1] ? decodeURIComponent(match[1]) : null;
+    }
+  }
+
+  private extractRefFromFieldCollection(fields: any): string | null {
+    if (!fields) return null;
+
+    if (Array.isArray(fields)) {
+      for (const field of fields) {
+        if (!field || typeof field !== 'object') continue;
+
+        const key = String(
+          field.field_name ||
+            field.name ||
+            field.key ||
+            field.code ||
+            field.id ||
+            '',
+        ).toLowerCase();
+
+        if (
+          ![
+            'ref',
+            'referral_ref',
+            'utm_ref',
+            'ref_source',
+            'reference_source',
+          ].includes(key)
+        ) {
+          continue;
+        }
+
+        const value = this.firstStringValue([
+          field.value,
+          field.text,
+          field.label,
+          field.display_value,
+        ]);
+
+        if (value) return value;
+      }
+
+      return null;
+    }
+
+    if (typeof fields === 'object') {
+      return this.firstStringValue([
+        fields.ref,
+        fields.referral_ref,
+        fields.utm_ref,
+        fields.ref_source,
+        fields.reference_source,
+        fields.Ref,
+        fields.REF,
+      ]);
+    }
+
+    return null;
+  }
+
+  private extractPancakeRef(record: any): string | null {
+    const direct = this.firstStringValue([
+      record?.ref,
+      record?.referral_ref,
+      record?.utm_ref,
+      record?.fb_ref,
+      record?.facebook_ref,
+      record?.messenger_ref,
+      record?.m_me_ref,
+      record?.ref_source,
+      record?.reference_source,
+    ]);
+
+    if (direct) return direct;
+
+    const fromCollections =
+      this.extractRefFromFieldCollection(record?.custom_fields) ||
+      this.extractRefFromFieldCollection(record?.fields) ||
+      this.extractRefFromFieldCollection(record?.values) ||
+      this.extractRefFromFieldCollection(record?.data);
+
+    if (fromCollections) return fromCollections;
+
+    return (
+      this.extractRefFromUrl(record?.source_url) ||
+      this.extractRefFromUrl(record?.referral_url) ||
+      this.extractRefFromUrl(record?.landing_url) ||
+      this.extractRefFromUrl(record?.conversation_source) ||
+      null
+    );
+  }
+
+  private getPancakeConversationIds(record: any): string[] {
+    const customer = record?.pancake_customer_obj ?? null;
+    const pageId = this.firstStringValue([
+      record?.page_id,
+      customer?.page_id,
+      record?.pageid,
+    ]);
+    const senderId = this.firstStringValue([
+      record?.facebookid,
+      record?.sender_id,
+      record?.psid,
+      customer?.psid,
+      customer?.customer_psid,
+      customer?.fb_id,
+    ]);
+
+    const candidates = [
+      record?.conversation_id,
+      pageId && senderId ? this.buildConversationId(pageId, senderId) : null,
+      pageId && senderId ? this.buildConversationId(senderId, pageId) : null,
+      senderId,
+    ]
+      .map((value) =>
+        value === undefined || value === null ? '' : String(value).trim(),
+      )
+      .filter(Boolean);
+
+    return [...new Set(candidates)];
+  }
+
+  private findPendingRefForPancakeRecord(record: any): {
+    conversationId: string;
+    ref: string;
+  } | null {
+    for (const conversationId of this.getPancakeConversationIds(record)) {
+      const pending = this.getPendingRef(conversationId);
+
+      if (pending?.ref) {
+        return {
+          conversationId,
+          ref: String(pending.ref),
+        };
+      }
+    }
+
+    return null;
+  }
+
   isEchoMessage(event: any): boolean {
     return !!event?.message?.is_echo;
   }
@@ -444,7 +608,8 @@ export class WebhookService {
             'ERROR',
           );
         } finally {
-          const activeTimers = this.pendingRetryTimers.get(conversationId) || [];
+          const activeTimers =
+            this.pendingRetryTimers.get(conversationId) || [];
           const remainingTimers = activeTimers.filter((item) => item !== timer);
 
           if (remainingTimers.length > 0) {
@@ -714,24 +879,49 @@ export class WebhookService {
   private async applyPendingRefToPancakeRecord(record: any) {
     const workspaceId = Number(record.workspace_id || 0);
     const tableId = String(record.table_id || '');
-    const conversationId = String(record.conversation_id || '');
     const recordId = String(record.id || '');
 
     if (workspaceId !== Number(process.env.PANCAKE_WORKSPACE || 607)) return;
     if (tableId !== String(process.env.PANCAKE_TABLE || 'lead')) return;
-    if (!conversationId || !recordId) return;
+    if (!recordId) return;
 
-    this.setLeadIndex(conversationId, recordId);
+    const conversationIds = this.getPancakeConversationIds(record);
+    if (conversationIds.length === 0) return;
 
-    const pending = this.getPendingRef(conversationId);
-    if (!pending?.ref) return;
+    for (const conversationId of conversationIds) {
+      this.setLeadIndex(conversationId, recordId);
+    }
 
-    const ref = String(pending.ref);
-    record.ref = ref;
+    const pending = this.findPendingRefForPancakeRecord(record);
+    if (!pending) {
+      const recordRef = this.extractPancakeRef(record);
+      if (recordRef) {
+        record.ref = recordRef;
+      } else {
+        this.logLine('Pancake record has no ref or pending ref', {
+          record_id: recordId,
+          conversation_id: record.conversation_id || null,
+          candidate_conversation_ids: conversationIds,
+          page_id:
+            record.page_id || record?.pancake_customer_obj?.page_id || null,
+          customer_psid:
+            record?.pancake_customer_obj?.psid ||
+            record?.pancake_customer_obj?.customer_psid ||
+            null,
+          fb_id: record?.pancake_customer_obj?.fb_id || null,
+          ref: record.ref || null,
+          ref_source: record.ref_source || null,
+          reference_source: record.reference_source || null,
+        });
+      }
+      return;
+    }
 
-    const ok = await this.syncRefToPancake(conversationId, ref);
+    record.ref = pending.ref;
+
+    const ok = await this.syncRefToPancake(pending.conversationId, pending.ref);
     if (ok) {
-      this.removePendingRef(conversationId);
+      this.removePendingRef(pending.conversationId);
     }
   }
 
@@ -741,14 +931,13 @@ export class WebhookService {
       ? this.readJsonFile(filePath)
       : [];
 
-    const conversationId = String(record.conversation_id || '');
+    const pending = this.findPendingRefForPancakeRecord(record);
 
-    if (conversationId) {
-      const pending = this.getPendingRef(conversationId);
-
-      if (pending?.ref) {
-        record.ref = String(pending.ref);
-      }
+    if (pending) {
+      record.ref = pending.ref;
+    } else {
+      const recordRef = this.extractPancakeRef(record);
+      if (recordRef) record.ref = recordRef;
     }
 
     records.push({
@@ -821,6 +1010,7 @@ export class WebhookService {
     action: 'created' | 'updated' = 'created',
   ) {
     const customer = record.pancake_customer_obj ?? null;
+    const ref = this.extractPancakeRef(record);
 
     return {
       event:
@@ -844,7 +1034,7 @@ export class WebhookService {
         conversation_id: record.conversation_id ?? null,
         page_id: record.page_id ?? customer?.page_id ?? null,
         facebook_id: record.facebookid ?? customer?.fb_id ?? null,
-        ref: record.ref ?? null,
+        ref,
         conversation_source: record.conversation_source ?? null,
 
         created_on: record.created_on ?? null,
@@ -903,6 +1093,8 @@ export class WebhookService {
         pancake_id: record.id ?? null,
         action,
         url,
+        has_ref: !!payload.lead.ref,
+        ref: payload.lead.ref || null,
       });
     } catch (error: any) {
       this.logLine(
