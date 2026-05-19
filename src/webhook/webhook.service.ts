@@ -13,6 +13,8 @@ export class WebhookService {
   private readonly baseDataPath = path.join(process.cwd(), 'data', 'webhook');
   private readonly logMaxSize = 2 * 1024 * 1024;
   private readonly logKeepLastLines = 300;
+  private readonly pendingRetryTimers = new Map<string, NodeJS.Timeout[]>();
+  private readonly pendingRetryDelays = [3000, 10000, 30000, 60000];
 
   private logFilePath() {
     return path.join(this.baseDataPath, 'messenger_webhook.log');
@@ -274,7 +276,7 @@ export class WebhookService {
       if (ref) return String(ref);
     } catch {}
 
-    const match = trimmedPayload.match(/(?:^|[?&])ref=([^&]+)/);
+    const match = trimmedPayload.match(/(?:^|[?&#|\s])ref=([^&|#\s]+)/i);
     if (match?.[1]) return decodeURIComponent(match[1]);
 
     return null;
@@ -370,6 +372,8 @@ export class WebhookService {
 
     if (ok) {
       this.removePendingRef(conversationId);
+    } else {
+      this.schedulePendingRefRetries(conversationId);
     }
   }
 
@@ -378,11 +382,71 @@ export class WebhookService {
 
     if (!pending?.ref) return;
 
+    this.logLine('Retry pending ref sync', {
+      conversation_id: conversationId,
+      ref: String(pending.ref),
+    });
+
     const ok = await this.syncRefToPancake(conversationId, String(pending.ref));
 
     if (ok) {
       this.removePendingRef(conversationId);
+      this.clearPendingRefRetries(conversationId);
+    } else {
+      this.schedulePendingRefRetries(conversationId);
     }
+  }
+
+  private clearPendingRefRetries(conversationId: string) {
+    const timers = this.pendingRetryTimers.get(conversationId) || [];
+
+    for (const timer of timers) {
+      clearTimeout(timer);
+    }
+
+    this.pendingRetryTimers.delete(conversationId);
+  }
+
+  private schedulePendingRefRetries(conversationId: string) {
+    if (this.pendingRetryTimers.has(conversationId)) return;
+
+    const timers: NodeJS.Timeout[] = [];
+
+    for (const delayMs of this.pendingRetryDelays) {
+      const timer = setTimeout(async () => {
+        try {
+          await this.retryPendingRefSync(conversationId);
+        } catch (error: any) {
+          this.logLine(
+            'Delayed pending ref retry failed',
+            {
+              conversation_id: conversationId,
+              delay_ms: delayMs,
+              message: error.message,
+            },
+            'ERROR',
+          );
+        } finally {
+          const activeTimers = this.pendingRetryTimers.get(conversationId) || [];
+          const remainingTimers = activeTimers.filter((item) => item !== timer);
+
+          if (remainingTimers.length > 0) {
+            this.pendingRetryTimers.set(conversationId, remainingTimers);
+          } else {
+            this.pendingRetryTimers.delete(conversationId);
+          }
+        }
+      }, delayMs);
+
+      timers.push(timer);
+    }
+
+    this.pendingRetryTimers.set(conversationId, timers);
+
+    this.logLine('Scheduled pending ref retries', {
+      conversation_id: conversationId,
+      delays_ms: this.pendingRetryDelays,
+    });
   }
 
   private pancakeUrl(apiPath: string, query: Record<string, any> = {}) {
