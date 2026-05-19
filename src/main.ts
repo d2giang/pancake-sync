@@ -3,7 +3,9 @@ import { AppModule } from './app.module';
 import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  const port = Number(process.env.PORT || 3000);
+  const host = '0.0.0.0';
 
   app.use(
     bodyParser.json({
@@ -13,7 +15,8 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(process.env.PORT || 3000);
+  await app.listen(port, host);
+  console.log(`Server listening on ${host}:${port}`);
 }
 
 bootstrap();

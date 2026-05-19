@@ -552,7 +552,17 @@ export class WebhookService {
           return recordId;
         }
       }
-    } catch {}
+    } catch (error: any) {
+      this.logLine(
+        'Pancake find lead request failed',
+        {
+          conversation_id: conversationId,
+          message: error.message,
+          response: error.response?.data,
+        },
+        'ERROR',
+      );
+    }
 
     this.logLine(
       'Lead not found in Pancake',

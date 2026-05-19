@@ -47,9 +47,20 @@ export class WebhookController {
 
       this.service.cleanOldPendingRefs();
 
+      this.service.logLine('Webhook POST received', {
+        object: data.object || null,
+        event: data.event || null,
+        action: data.action || null,
+        type: data.type || null,
+        event_type: data.event_type || null,
+        has_table_id: !!data.table_id,
+        has_conversation_id: !!data.conversation_id,
+      });
+
       if (
         this.service.isPancakePayload(data) ||
-        this.service.isPancakeCreatedRecord(data)
+        this.service.isPancakeCreatedRecord(data) ||
+        this.service.isPancakeUpdatedRecord(data)
       ) {
         await this.service.handlePancakeWebhook(data);
         return res.status(200).type('text/plain').send('EVENT_RECEIVED');
@@ -61,6 +72,15 @@ export class WebhookController {
         if (!this.service.verifySignature(rawBody, signature)) {
           return res.status(403).type('text/plain').send('Invalid signature');
         }
+
+        this.service.logLine('Meta page webhook received', {
+          entries: Array.isArray(data.entry) ? data.entry.length : 0,
+          events: (data.entry || []).reduce(
+            (total: number, entry: any) =>
+              total + (Array.isArray(entry.messaging) ? entry.messaging.length : 0),
+            0,
+          ),
+        });
 
         for (const entry of data.entry || []) {
           for (const event of entry.messaging || []) {
