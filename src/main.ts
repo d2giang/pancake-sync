@@ -7,6 +7,12 @@ async function bootstrap() {
   const port = Number(process.env.PORT || 3000);
   const host = '0.0.0.0';
 
+  app.enableCors({
+    origin: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  });
+
   app.use(
     bodyParser.json({
       verify: (req: any, _res, buf) => {

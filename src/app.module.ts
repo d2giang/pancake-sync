@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { BroadcastModule } from './broadcast/broadcast.module';
 import { WebhookModule } from './webhook/webhook.module';
 
 @Module({
@@ -7,6 +8,7 @@ import { WebhookModule } from './webhook/webhook.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    BroadcastModule,
     WebhookModule,
   ],
 })
