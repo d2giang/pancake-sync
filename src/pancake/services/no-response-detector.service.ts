@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LocalCacheService } from './local-cache.service';
 import { PancakeWebhookForwardService } from './pancake-webhook-forward.service';
-import { parsePageTokens } from '../utils/env-validator';
+import {
+  parsePageTokens,
+  isIdempotencyEnabled,
+  isForwardNoResponseEvents,
+} from '../utils/env-validator';
 import {
   ConversationSummary,
   LaravelNoResponsePayload,
@@ -169,17 +173,18 @@ export class NoResponseDetectorService {
       }
     }
 
-    // Idempotency check
+    // Idempotency check (respect IDEMPOTENCY_ENABLED flag)
     const idempotencyKey = `${action}:${summary.conversation_id}:${lastOutbound}`;
 
-    // Check if already sent
-    const alreadySent = this.cache.hasNoResponseEventBeenSent(
-      summary.conversation_id,
-      action,
-      idempotencyKey,
-    );
+    if (isIdempotencyEnabled()) {
+      const alreadySent = this.cache.hasNoResponseEventBeenSent(
+        summary.conversation_id,
+        action,
+        idempotencyKey,
+      );
 
-    if (alreadySent) return null;
+      if (alreadySent) return null;
+    }
 
     // Build payload
     return {
@@ -216,6 +221,14 @@ export class NoResponseDetectorService {
       ...eventData,
       occurred_at: new Date().toISOString(),
     };
+
+    // Respect forward flag
+    if (!isForwardNoResponseEvents()) {
+      this.logger.debug(
+        `No-response forward disabled, skipping ${eventData.action} for ${summary.conversation_id}`,
+      );
+      return;
+    }
 
     const ok = await this.forwardService.forwardToLaravel(payload);
 

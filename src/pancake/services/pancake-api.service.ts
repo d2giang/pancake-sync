@@ -1,27 +1,29 @@
 import { Injectable, Logger } from '@nestjs/common';
-import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
-import { getPageToken } from '../utils/env-validator';
+import axios, { AxiosInstance } from 'axios';
+import {
+  getPageToken,
+  getPancakePublicApiBaseUrl,
+  getPancakeApiTimeout,
+} from '../utils/env-validator';
 import {
   PancakeApiResponse,
   PancakeConversation,
-  PancakeMessagingWebhookPayload,
 } from '../interfaces/pancake.interface';
 
 @Injectable()
 export class PancakeApiService {
   private readonly logger = new Logger(PancakeApiService.name);
   private readonly baseUrl: string;
+  private readonly timeout: number;
 
   constructor() {
-    this.baseUrl = (
-      process.env.PANCAKE_BASE_URL ||
-      'https://pages.fm/api/public_api'
-    ).replace(/\/$/, '');
+    this.baseUrl = getPancakePublicApiBaseUrl();
+    this.timeout = getPancakeApiTimeout();
   }
 
   /**
    * Create an Axios instance with the appropriate auth header for a given page.
-   * Uses PANCAKE_PAGE_TOKENS env config.
+   * Uses PANCAKE_PAGE_TOKENS or PANCAKE_PAGE_ID/PANCAKE_PAGE_ACCESS_TOKEN env config.
    */
   private clientForPage(pageId: string): AxiosInstance {
     const token = getPageToken(pageId);
@@ -32,7 +34,7 @@ export class PancakeApiService {
 
     return axios.create({
       baseURL: this.baseUrl,
-      timeout: 30000,
+      timeout: this.timeout,
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',

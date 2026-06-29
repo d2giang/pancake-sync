@@ -1,31 +1,39 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import {
+  getLaravelWebhookUrl,
+  getLaravelWebhookSecret,
+  getLaravelWebhookTimeout,
+  getLaravelWebhookRetryCount,
+  getLaravelWebhookRetryDelay,
+} from '../utils/env-validator';
 
 @Injectable()
 export class PancakeWebhookForwardService {
   private readonly logger = new Logger(PancakeWebhookForwardService.name);
-  private readonly maxRetries = 2;
-  private readonly retryDelayMs = 2000;
 
   /**
    * Forward payload to Laravel webhook.
    * Retries on network errors only (not on 4xx/5xx responses).
    */
   async forwardToLaravel(payload: Record<string, any>): Promise<boolean> {
-    const url = (process.env.LARAVEL_WEBHOOK_URL || '').trim();
+    const url = getLaravelWebhookUrl();
 
     if (!url) {
       this.logger.debug('LARAVEL_WEBHOOK_URL not set, skipping forward');
       return false;
     }
 
-    const secret = process.env.LARAVEL_WEBHOOK_SECRET || '';
+    const secret = getLaravelWebhookSecret();
+    const timeout = getLaravelWebhookTimeout();
+    const maxRetries = getLaravelWebhookRetryCount();
+    const retryDelayMs = getLaravelWebhookRetryDelay();
     const idempotencyKey = payload.idempotency_key || null;
 
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         await axios.post(url, payload, {
-          timeout: 15000,
+          timeout,
           headers: {
             'Content-Type': 'application/json',
             'X-Webhook-Secret': secret,
@@ -51,11 +59,11 @@ export class PancakeWebhookForwardService {
           error.code === 'ENOTFOUND' ||
           error.code === 'EPIPE';
 
-        if (isNetworkError && attempt < this.maxRetries) {
+        if (isNetworkError && attempt < maxRetries) {
           this.logger.warn(
-            `Forward attempt ${attempt + 1} failed (network), retrying in ${this.retryDelayMs}ms…`,
+            `Forward attempt ${attempt + 1} failed (network), retrying in ${retryDelayMs}ms…`,
           );
-          await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs));
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
           continue;
         }
 

@@ -8,6 +8,12 @@ import {
   PancakeMessagingWebhookPayload,
   LaravelMessagingPayload,
 } from '../interfaces/pancake.interface';
+import {
+  isMessagingWebhookEnabled,
+  isForwardMessagingEvents,
+  isStoreConversationCache,
+  isStoreMessageCache,
+} from '../utils/env-validator';
 
 @Controller('api/pancake/webhook')
 export class PancakeWebhookController {
@@ -28,6 +34,11 @@ export class PancakeWebhookController {
     @Res() res: Response,
   ) {
     try {
+      // Feature toggle check
+      if (!isMessagingWebhookEnabled()) {
+        return res.status(200).json({ success: true, message: 'Webhook disabled' });
+      }
+
       const data = req.body as PancakeMessagingWebhookPayload;
 
       if (!data || typeof data !== 'object') {
@@ -61,29 +72,35 @@ export class PancakeWebhookController {
       // 2. Normalize message
       const normalizedMessage = mapMessageToNormalized(message, pageId);
 
-      // 3. Cache locally
-      this.cache.upsertConversation(summary);
-      this.cache.appendMessage({
-        conversation_id: conversationId,
-        normalized_message: normalizedMessage,
-        raw_message: message,
-      });
+      // 3. Cache locally (respect store flags)
+      if (isStoreConversationCache()) {
+        this.cache.upsertConversation(summary);
+      }
+      if (isStoreMessageCache()) {
+        this.cache.appendMessage({
+          conversation_id: conversationId,
+          normalized_message: normalizedMessage,
+          raw_message: message,
+        });
+      }
 
-      // 4. Forward to Laravel
-      const payload: LaravelMessagingPayload = {
-        event_version: '1.0',
-        event: 'pancake_messaging',
-        action: 'conversation_message_received',
-        occurred_at: new Date().toISOString(),
-        page_id: pageId,
-        conversation_id: conversationId,
-        conversation_summary: summary,
-        message: normalizedMessage,
-        raw_conversation_data: conversation,
-        raw_message_data: message,
-      };
+      // 4. Forward to Laravel (respect forward flag)
+      if (isForwardMessagingEvents()) {
+        const payload: LaravelMessagingPayload = {
+          event_version: '1.0',
+          event: 'pancake_messaging',
+          action: 'conversation_message_received',
+          occurred_at: new Date().toISOString(),
+          page_id: pageId,
+          conversation_id: conversationId,
+          conversation_summary: summary,
+          message: normalizedMessage,
+          raw_conversation_data: conversation,
+          raw_message_data: message,
+        };
 
-      await this.forwardService.forwardToLaravel(payload);
+        await this.forwardService.forwardToLaravel(payload);
+      }
 
       this.logger.log(
         `Processed messaging webhook for conversation ${conversationId} (page ${pageId})`,

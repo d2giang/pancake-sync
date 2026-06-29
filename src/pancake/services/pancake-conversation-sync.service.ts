@@ -3,7 +3,11 @@ import { PancakeApiService } from './pancake-api.service';
 import { LocalCacheService } from './local-cache.service';
 import { PancakeWebhookForwardService } from './pancake-webhook-forward.service';
 import { mapConversationToSummary } from '../mappers/pancake-conversation.mapper';
-import { parsePageTokens } from '../utils/env-validator';
+import {
+  parsePageTokens,
+  isForwardConversationEvents,
+  isStoreConversationCache,
+} from '../utils/env-validator';
 import {
   PancakeConversation,
   SyncResult,
@@ -148,27 +152,33 @@ export class PancakeConversationSyncService {
           // Normalize
           const summary = mapConversationToSummary(conv);
 
-          // Cache locally
-          this.cache.upsertConversation(summary);
+          // Cache locally (respect store flag)
+          if (isStoreConversationCache()) {
+            this.cache.upsertConversation(summary);
+          }
 
-          // Forward to Laravel
-          const payload: LaravelConversationSyncPayload = {
-            event_version: '1.0',
-            event: 'pancake_conversation',
-            action: 'conversation_synced',
-            occurred_at: new Date().toISOString(),
-            page_id: pageId,
-            conversation_id: convId,
-            conversation_summary: summary,
-            raw_conversation_data: conv,
-          };
+          // Forward to Laravel (respect forward flag)
+          if (isForwardConversationEvents()) {
+            const payload: LaravelConversationSyncPayload = {
+              event_version: '1.0',
+              event: 'pancake_conversation',
+              action: 'conversation_synced',
+              occurred_at: new Date().toISOString(),
+              page_id: pageId,
+              conversation_id: convId,
+              conversation_summary: summary,
+              raw_conversation_data: conv,
+            };
 
-          const ok = await this.forwardService.forwardToLaravel(payload);
+            const ok = await this.forwardService.forwardToLaravel(payload);
 
-          if (ok) {
-            result.synced++;
+            if (ok) {
+              result.synced++;
+            } else {
+              result.failed++;
+            }
           } else {
-            result.failed++;
+            result.synced++;
           }
         } catch (error: any) {
           result.failed++;
@@ -212,22 +222,26 @@ export class PancakeConversationSyncService {
 
       const summary = mapConversationToSummary(conv);
 
-      // Cache locally
-      this.cache.upsertConversation(summary);
+      // Cache locally (respect store flag)
+      if (isStoreConversationCache()) {
+        this.cache.upsertConversation(summary);
+      }
 
-      // Forward to Laravel
-      const payload: LaravelConversationSyncPayload = {
-        event_version: '1.0',
-        event: 'pancake_conversation',
-        action: 'conversation_synced',
-        occurred_at: new Date().toISOString(),
-        page_id: pageId,
-        conversation_id: conversationId,
-        conversation_summary: summary,
-        raw_conversation_data: conv,
-      };
+      // Forward to Laravel (respect forward flag)
+      if (isForwardConversationEvents()) {
+        const payload: LaravelConversationSyncPayload = {
+          event_version: '1.0',
+          event: 'pancake_conversation',
+          action: 'conversation_synced',
+          occurred_at: new Date().toISOString(),
+          page_id: pageId,
+          conversation_id: conversationId,
+          conversation_summary: summary,
+          raw_conversation_data: conv,
+        };
 
-      await this.forwardService.forwardToLaravel(payload);
+        await this.forwardService.forwardToLaravel(payload);
+      }
 
       return { success: true, summary };
     } catch (error: any) {

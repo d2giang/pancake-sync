@@ -7,28 +7,31 @@ import {
   NoResponseCache,
   NoResponseEventRecord,
 } from '../interfaces/pancake.interface';
+import {
+  isStoreConversationCache,
+  isStoreMessageCache,
+  isStoreConversationSummaryCache,
+  isStoreNoResponseCache,
+  getConfigFilePath,
+} from '../utils/env-validator';
 
 @Injectable()
 export class LocalCacheService {
   private readonly logger = new Logger(LocalCacheService.name);
   private readonly baseDataPath = path.join(process.cwd(), 'data', 'webhook');
 
-  // File paths
-  private readonly conversationsPath = path.join(
-    this.baseDataPath,
-    'pancake-conversations.json',
+  // File paths from env or defaults
+  private readonly conversationsPath = path.resolve(
+    getConfigFilePath('PANCAKE_CONVERSATIONS_FILE', path.join(this.baseDataPath, 'pancake-conversations.json')),
   );
-  private readonly messagesPath = path.join(
-    this.baseDataPath,
-    'pancake-messages.json',
+  private readonly messagesPath = path.resolve(
+    getConfigFilePath('PANCAKE_MESSAGES_FILE', path.join(this.baseDataPath, 'pancake-messages.json')),
   );
-  private readonly summaryIndexPath = path.join(
-    this.baseDataPath,
-    'conversation-summary-index.json',
+  private readonly summaryIndexPath = path.resolve(
+    getConfigFilePath('CONVERSATION_SUMMARY_FILE', path.join(this.baseDataPath, 'conversation-summary-index.json')),
   );
-  private readonly noResponseEventsPath = path.join(
-    this.baseDataPath,
-    'no-response-events.json',
+  private readonly noResponseEventsPath = path.resolve(
+    getConfigFilePath('NO_RESPONSE_EVENTS_FILE', path.join(this.baseDataPath, 'no-response-events.json')),
   );
   private readonly noResponseCachePath = path.join(
     this.baseDataPath,
