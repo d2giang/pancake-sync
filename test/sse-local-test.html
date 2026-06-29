@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SSE Broadcast Test</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        color: #17202a;
+        background: #f5f7fb;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      main {
+        width: min(920px, calc(100vw - 32px));
+        margin: 32px auto;
+      }
+
+      h1 {
+        margin: 0 0 16px;
+        font-size: 28px;
+        line-height: 1.2;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      button,
+      a {
+        border: 1px solid #ccd5e0;
+        border-radius: 6px;
+        background: #fff;
+        color: #17202a;
+        cursor: pointer;
+        font: inherit;
+        padding: 10px 14px;
+        text-decoration: none;
+      }
+
+      button.primary {
+        border-color: #1f7a5a;
+        background: #1f7a5a;
+        color: #fff;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+        font-weight: 600;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #c44;
+      }
+
+      .dot.ok {
+        background: #1f9d61;
+      }
+
+      pre {
+        min-height: 420px;
+        margin: 0;
+        overflow: auto;
+        border: 1px solid #dce3ec;
+        border-radius: 8px;
+        background: #0f1720;
+        color: #d8e4f2;
+        padding: 16px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Local SSE Broadcast Test</h1>
+
+      <div class="status">
+        <span id="dot" class="dot"></span>
+        <span id="status">Disconnected</span>
+      </div>
+
+      <div class="toolbar">
+        <button class="primary" id="connect">Connect</button>
+        <button id="disconnect">Disconnect</button>
+        <button id="broadcast">Broadcast direct</button>
+        <a href="https://api.crm.mintoku.vn/api/test-socket" target="_blank">
+          Open Laravel test
+        </a>
+      </div>
+
+      <pre id="log"></pre>
+    </main>
+
+    <script>
+      const eventsUrl = 'https://pancake-sync.onrender.com/events';
+      const broadcastUrl = 'https://pancake-sync.onrender.com/broadcast';
+      const logEl = document.querySelector('#log');
+      const statusEl = document.querySelector('#status');
+      const dotEl = document.querySelector('#dot');
+      let source = null;
+
+      function log(label, value) {
+        const time = new Date().toLocaleTimeString();
+        const payload =
+          value === undefined ? '' : `\n${JSON.stringify(value, null, 2)}`;
+        logEl.textContent = `[${time}] ${label}${payload}\n\n${logEl.textContent}`;
+      }
+
+      function setStatus(text, connected) {
+        statusEl.textContent = text;
+        dotEl.classList.toggle('ok', connected);
+      }
+
+      function connect() {
+        if (source) source.close();
+
+        source = new EventSource(eventsUrl);
+        setStatus('Connecting...', false);
+        log('Connecting', { eventsUrl });
+
+        source.addEventListener('connected', (event) => {
+          setStatus('Connected', true);
+          log('connected', JSON.parse(event.data));
+        });
+
+        source.addEventListener('candidate.updated', (event) => {
+          log('candidate.updated', JSON.parse(event.data));
+        });
+
+        source.onerror = () => {
+          setStatus('Reconnecting or disconnected', false);
+          log('SSE error');
+        };
+      }
+
+      document.querySelector('#connect').addEventListener('click', connect);
+
+      document.querySelector('#disconnect').addEventListener('click', () => {
+        if (source) source.close();
+        source = null;
+        setStatus('Disconnected', false);
+        log('Disconnected');
+      });
+
+      document.querySelector('#broadcast').addEventListener('click', async () => {
+        const response = await fetch(broadcastUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event: 'candidate.updated',
+            data: {
+              id: 999,
+              name: 'Local browser test',
+            },
+          }),
+        });
+
+        log('Broadcast response', await response.json());
+      });
+
+      connect();
+    </script>
+  </body>
+</html>

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { BroadcastModule } from './broadcast/broadcast.module';
 import { WebhookModule } from './webhook/webhook.module';
+import { PancakeModule } from './pancake/pancake.module';
 
 @Module({
   imports: [
@@ -10,6 +11,7 @@ import { WebhookModule } from './webhook/webhook.module';
     }),
     BroadcastModule,
     WebhookModule,
+    PancakeModule,
   ],
 })
 export class AppModule {}
