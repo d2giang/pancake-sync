@@ -43,13 +43,6 @@ export class PancakeWebhookForwardService {
           },
         });
 
-        const action = payload.action || 'unknown';
-        const conversationId = payload.conversation_id || 'unknown';
-
-        this.logger.log(
-          `Forwarded [${action}] for conversation ${conversationId} to Laravel`,
-        );
-
         return true;
       } catch (error: any) {
         const isNetworkError =

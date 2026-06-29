@@ -263,9 +263,7 @@ export class NoResponseDetectorService {
         cacheEntry,
       );
 
-      this.logger.log(
-        `Emitted ${eventData.action} for conversation ${summary.conversation_id}`,
-      );
+      // Success tracked by summary counters (1W/1M totals in checkAllPages)
     }
   }
 }

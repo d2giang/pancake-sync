@@ -94,12 +94,10 @@ export class WebhookService {
       'utf8',
     );
 
+    // Only ERROR goes to console; IMPORTANT/DEBUG → file only
     if (level === 'ERROR') {
       this.logger.error(message, JSON.stringify(context));
-      return;
     }
-
-    this.logger.log(`[${level}] ${message} ${JSON.stringify(context)}`);
   }
 
   verifySignature(rawBody: string, header: string): boolean {
@@ -494,29 +492,11 @@ export class WebhookService {
     const userId = senderId;
     const conversationId = this.buildConversationId(pageId, userId);
 
-    this.logLine('Meta event processed', {
-      event_type: eventType,
-      conversation_id: conversationId,
-      page_id: pageId || null,
-      sender_id: userId || null,
-      has_ref: !!ref,
-      has_postback: !!event?.postback,
-      postback_payload: event?.postback?.payload || null,
-      has_quick_reply: !!event?.message?.quick_reply,
-      quick_reply_payload: event?.message?.quick_reply?.payload || null,
-      has_message_text: !!event?.message?.text,
-      has_referral: !!event?.referral,
-      has_postback_referral: !!event?.postback?.referral,
-      has_message_referral: !!event?.message?.referral,
-      has_optin: !!event?.optin,
-    });
-
+    // Only log when ref is captured (important business event)
     if (ref && pageId && userId) {
       this.logLine('Meta ref captured', {
-        event_type: eventType,
         conversation_id: conversationId,
-        page_id: pageId,
-        sender_id: userId,
+        event_type: eventType,
         ref,
       });
 
@@ -524,18 +504,8 @@ export class WebhookService {
     }
 
     if (this.isUserInteractionEvent(event, eventType) && pageId && userId) {
-      await this.retryPendingRefSync(conversationId);
-    }
-
-    if (!ref && eventType !== 'message') {
-      this.logLine('Meta event received without ref', {
-        event_type: eventType,
-        conversation_id: conversationId,
-        has_postback_referral: !!event?.postback?.referral,
-        has_referral: !!event?.referral,
-        has_message_referral: !!event?.message?.referral,
-        has_optin: !!event?.optin,
-      });
+      // Fire-and-forget retry without logging every interaction
+      await this.retryPendingRefSync(conversationId, true);
     }
   }
 
@@ -558,15 +528,17 @@ export class WebhookService {
     }
   }
 
-  async retryPendingRefSync(conversationId: string) {
+  async retryPendingRefSync(conversationId: string, silent = false) {
     const pending = this.getPendingRef(conversationId);
 
     if (!pending?.ref) return;
 
-    this.logLine('Retry pending ref sync', {
-      conversation_id: conversationId,
-      ref: String(pending.ref),
-    });
+    if (!silent) {
+      this.logLine('Retry pending ref sync', {
+        conversation_id: conversationId,
+        ref: String(pending.ref),
+      });
+    }
 
     const ok = await this.syncRefToPancake(conversationId, String(pending.ref));
 
@@ -628,7 +600,7 @@ export class WebhookService {
     this.logLine('Scheduled pending ref retries', {
       conversation_id: conversationId,
       delays_ms: this.pendingRetryDelays,
-    });
+    }, 'DEBUG');
   }
 
   private pancakeUrl(apiPath: string, query: Record<string, any> = {}) {
@@ -747,11 +719,11 @@ export class WebhookService {
     }
 
     this.logLine(
-      'Lead not found in Pancake',
+      'Lead not found in Pancake (retry pending)',
       {
         conversation_id: conversationId,
       },
-      'ERROR',
+      'IMPORTANT',
     );
 
     return null;
@@ -769,12 +741,12 @@ export class WebhookService {
 
     if (!recordId) {
       this.logLine(
-        'Cannot sync ref because record id not found',
+        'Cannot sync ref because record id not found (will retry)',
         {
           conversation_id: conversationId,
           ref,
         },
-        'ERROR',
+        'IMPORTANT',
       );
 
       return false;
@@ -789,7 +761,7 @@ export class WebhookService {
         conversation_id: conversationId,
         record_id: recordId,
         ref,
-      });
+      }, 'DEBUG');
     }
 
     return ok;
@@ -1092,10 +1064,9 @@ export class WebhookService {
       this.logLine('Forwarded Pancake record to Laravel', {
         pancake_id: record.id ?? null,
         action,
-        url,
         has_ref: !!payload.lead.ref,
         ref: payload.lead.ref || null,
-      });
+      }, 'DEBUG');
     } catch (error: any) {
       this.logLine(
         'Forward Pancake record to Laravel failed',

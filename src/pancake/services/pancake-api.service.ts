@@ -68,9 +68,7 @@ export class PancakeApiService {
         body,
       );
 
-      this.logger.log(
-        `Sent message to conversation ${conversationId} on page ${pageId}`,
-      );
+      // Success — no log needed (errors go to catch)
 
       return res.data;
     } catch (error: any) {
@@ -98,9 +96,7 @@ export class PancakeApiService {
         { action, tag_id: tagId },
       );
 
-      this.logger.log(
-        `Tag ${action} ${tagId} on conversation ${conversationId}`,
-      );
+      // Success — no log needed
 
       return res.data;
     } catch (error: any) {
@@ -127,9 +123,7 @@ export class PancakeApiService {
         { assignee_ids: assigneeIds },
       );
 
-      this.logger.log(
-        `Assigned conversation ${conversationId} to [${assigneeIds.join(',')}]`,
-      );
+      // Success — no log needed
 
       return res.data;
     } catch (error: any) {
@@ -154,7 +148,7 @@ export class PancakeApiService {
         `/v1/pages/${pageId}/conversations/${conversationId}/read`,
       );
 
-      this.logger.log(`Marked read: ${conversationId}`);
+      // Success — no log needed
 
       return res.data;
     } catch (error: any) {
@@ -177,7 +171,7 @@ export class PancakeApiService {
         `/v1/pages/${pageId}/conversations/${conversationId}/unread`,
       );
 
-      this.logger.log(`Marked unread: ${conversationId}`);
+      // Success — no log needed
 
       return res.data;
     } catch (error: any) {

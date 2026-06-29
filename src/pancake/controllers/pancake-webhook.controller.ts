@@ -102,9 +102,7 @@ export class PancakeWebhookController {
         await this.forwardService.forwardToLaravel(payload);
       }
 
-      this.logger.log(
-        `Processed messaging webhook for conversation ${conversationId} (page ${pageId})`,
-      );
+      // Success handled silently — errors go to catch block
 
       return res.status(200).json({ success: true, message: 'EVENT_RECEIVED' });
     } catch (error: any) {
