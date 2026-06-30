@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { PancakeConversationActionService } from '../services/pancake-conversation-action.service';
 import { PancakeConversationSyncService } from '../services/pancake-conversation-sync.service';
+import { NoResponseDetectorService } from '../services/no-response-detector.service';
 import {
   SendMessageDto,
   TagActionDto,
@@ -24,6 +25,7 @@ export class PancakeInternalController {
   constructor(
     private readonly actionService: PancakeConversationActionService,
     private readonly syncService: PancakeConversationSyncService,
+    private readonly noResponseService: NoResponseDetectorService,
   ) {}
 
   /**
@@ -210,6 +212,44 @@ export class PancakeInternalController {
     } catch (err: any) {
       throw new HttpException(
         err.message || 'Failed to mark unread',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * POST /internal/pancake/sync/trigger
+   * Manually trigger full conversation sync for all pages.
+   */
+  @Post('sync/trigger')
+  async triggerSync(@Headers() headers: Record<string, string>) {
+    this.verifySecret(headers);
+
+    try {
+      await this.syncService.syncAllPages();
+      return { success: true, message: 'Sync triggered' };
+    } catch (err: any) {
+      throw new HttpException(
+        err.message || 'Failed to trigger sync',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * POST /internal/pancake/no-response/trigger
+   * Manually trigger no-response check.
+   */
+  @Post('no-response/trigger')
+  async triggerNoResponse(@Headers() headers: Record<string, string>) {
+    this.verifySecret(headers);
+
+    try {
+      await this.noResponseService.checkAllPages();
+      return { success: true, message: 'No-response check triggered' };
+    } catch (err: any) {
+      throw new HttpException(
+        err.message || 'Failed to trigger no-response check',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
