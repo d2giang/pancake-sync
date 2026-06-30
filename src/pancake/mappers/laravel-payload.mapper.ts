@@ -4,6 +4,15 @@ import { ConversationSummary, NormalizedMessage } from '../interfaces/pancake.in
  * Flatten a ConversationSummary into the exact field names
  * CandidateConversationSyncService::mapConversationData() (Laravel) reads.
  * Laravel reads these as top-level keys, not nested under `conversation_summary`.
+ *
+ * Deliberately excludes `raw_conversation_data` — it includes
+ * tag_histories/assignee_histories, which grow unbounded over a
+ * conversation's lifetime. This helper is also used on the real-time
+ * per-message webhook path (pancake-webhook.controller.ts), so including the
+ * full raw blob there would mean re-sending months of history on every
+ * single incoming message. Callers that do a deliberate full conversation
+ * sync (pancake-conversation-sync.service.ts) add raw_conversation_data
+ * themselves, separately.
  */
 export function buildLaravelConversationFields(
   summary: ConversationSummary,
@@ -45,8 +54,26 @@ export function buildLaravelConversationFields(
     assignee_ids: summary.assignee_ids,
     current_assign_users: summary.current_assign_users,
     tags: summary.tags,
-    raw_conversation_data: summary.raw_conversation_data,
+    // Laravel has a dedicated `tag_histories` column, but the raw array
+    // grows forever (months of tag add/remove events) — cap it so the
+    // column doesn't grow unbounded for old/active conversations.
+    tag_histories: Array.isArray(summary.raw_conversation_data?.tag_histories)
+      ? summary.raw_conversation_data.tag_histories.slice(0, 20)
+      : null,
   };
+}
+
+/**
+ * Strip fields from the raw conversation object that are unbounded
+ * (grow forever) and unused by Laravel — currently just
+ * `assignee_histories`, which has no corresponding Laravel column.
+ * `tag_histories` is handled separately via buildLaravelConversationFields
+ * (capped, sent as its own field) so it's stripped here too to avoid
+ * storing it twice.
+ */
+export function trimRawConversationData<T extends Record<string, any>>(raw: T): T {
+  const { assignee_histories, tag_histories, ...rest } = raw || ({} as T);
+  return rest as T;
 }
 
 /**

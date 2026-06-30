@@ -7,6 +7,7 @@ import { mapMessageToNormalized } from '../mappers/pancake-message.mapper';
 import {
   buildLaravelConversationFields,
   buildLaravelMessageFields,
+  trimRawConversationData,
 } from '../mappers/laravel-payload.mapper';
 import {
   parsePageTokens,
@@ -173,7 +174,7 @@ export class PancakeConversationSyncService {
               page_id: pageId,
               conversation_id: convId,
               conversation_summary: summary,
-              raw_conversation_data: conv,
+              raw_conversation_data: trimRawConversationData(conv),
               ...buildLaravelConversationFields(summary),
             };
 
@@ -244,7 +245,7 @@ export class PancakeConversationSyncService {
           page_id: pageId,
           conversation_id: conversationId,
           conversation_summary: summary,
-          raw_conversation_data: conv,
+          raw_conversation_data: trimRawConversationData(conv),
           ...buildLaravelConversationFields(summary),
         };
 
