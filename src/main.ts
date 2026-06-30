@@ -15,6 +15,10 @@ async function bootstrap() {
 
   app.use(
     bodyParser.json({
+      // Default 100kb is too small — Pancake conversation/webhook payloads
+      // (recent_phone_numbers, tags, customers, raw data) routinely exceed it
+      // for active conversations.
+      limit: '5mb',
       verify: (req: any, _res, buf) => {
         req.rawBody = buf.toString('utf8');
       },
