@@ -22,8 +22,13 @@ export class PancakeApiService {
   }
 
   /**
-   * Create an Axios instance with the appropriate auth header for a given page.
+   * Create an Axios instance with the appropriate auth for a given page.
    * Uses PANCAKE_PAGE_TOKENS or PANCAKE_PAGE_ID/PANCAKE_PAGE_ACCESS_TOKEN env config.
+   *
+   * Pancake's Public API expects the token as an `access_token` query param
+   * (Facebook Graph API style), not an Authorization header — sending it as
+   * Bearer-only produces "access_token is required" even with a valid token.
+   * Kept as a header too in case some endpoints also accept it that way.
    */
   private clientForPage(pageId: string): AxiosInstance {
     const token = getPageToken(pageId);
@@ -35,6 +40,7 @@ export class PancakeApiService {
     return axios.create({
       baseURL: this.baseUrl,
       timeout: this.timeout,
+      params: token ? { access_token: token } : {},
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
