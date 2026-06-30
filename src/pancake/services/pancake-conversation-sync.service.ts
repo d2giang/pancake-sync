@@ -3,6 +3,11 @@ import { PancakeApiService } from './pancake-api.service';
 import { LocalCacheService } from './local-cache.service';
 import { PancakeWebhookForwardService } from './pancake-webhook-forward.service';
 import { mapConversationToSummary } from '../mappers/pancake-conversation.mapper';
+import { mapMessageToNormalized } from '../mappers/pancake-message.mapper';
+import {
+  buildLaravelConversationFields,
+  buildLaravelMessageFields,
+} from '../mappers/laravel-payload.mapper';
 import {
   parsePageTokens,
   isForwardConversationEvents,
@@ -168,6 +173,7 @@ export class PancakeConversationSyncService {
               conversation_id: convId,
               conversation_summary: summary,
               raw_conversation_data: conv,
+              ...buildLaravelConversationFields(summary),
             };
 
             const ok = await this.forwardService.forwardToLaravel(payload);
@@ -238,9 +244,17 @@ export class PancakeConversationSyncService {
           conversation_id: conversationId,
           conversation_summary: summary,
           raw_conversation_data: conv,
+          ...buildLaravelConversationFields(summary),
         };
 
         await this.forwardService.forwardToLaravel(payload);
+      }
+
+      // Backfill message history (best-effort; on-demand sync only —
+      // not run on the periodic scheduler to avoid hammering Pancake/Laravel
+      // for every conversation every cycle).
+      if (isForwardConversationEvents()) {
+        await this.backfillMessages(pageId, conversationId);
       }
 
       return { success: true, summary };
@@ -249,6 +263,53 @@ export class PancakeConversationSyncService {
         `Sync single conversation ${conversationId} failed: ${error.message}`,
       );
       return { success: false };
+    }
+  }
+
+  /**
+   * Fetch and forward message history for a single conversation.
+   * Errors are logged but do not fail the overall sync.
+   */
+  private async backfillMessages(
+    pageId: string,
+    conversationId: string,
+  ): Promise<void> {
+    try {
+      const response = await this.pancakeApi.getConversationMessages(
+        pageId,
+        conversationId,
+      );
+
+      const rawMessages: any[] =
+        response?.data ||
+        response?.entries ||
+        (Array.isArray(response) ? response : []);
+
+      if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
+        return;
+      }
+
+      for (const raw of rawMessages) {
+        const normalized = mapMessageToNormalized(raw, pageId);
+
+        await this.forwardService.forwardToLaravel({
+          event_version: '1.0',
+          event: 'message_received',
+          action: 'conversation_message_received',
+          occurred_at: new Date().toISOString(),
+          page_id: pageId,
+          conversation_id: conversationId,
+          ...buildLaravelMessageFields(pageId, conversationId, normalized),
+        });
+      }
+
+      this.logger.log(
+        `Backfilled ${rawMessages.length} messages for conversation ${conversationId}`,
+      );
+    } catch (error: any) {
+      this.logger.warn(
+        `Message backfill failed for ${conversationId}: ${error.message}`,
+      );
     }
   }
 }

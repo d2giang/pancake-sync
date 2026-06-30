@@ -183,6 +183,44 @@ export class PancakeApiService {
   }
 
   /**
+   * Fetch message history for a conversation (used to backfill message
+   * content, since Pancake's conversation-list/sync endpoints only return
+   * conversation-level summaries, not individual messages).
+   *
+   * NOTE: this mirrors the path used by sendMessage() (GET vs POST on the
+   * same resource), which is the documented convention for this API family.
+   * Verify against Pancake's public API docs before relying on this in
+   * production — the response shape assumption (`data`/`entries` array,
+   * same as getConversations) has not been confirmed against a live call.
+   */
+  async getConversationMessages(
+    pageId: string,
+    conversationId: string,
+    params?: { limit?: number; before?: string; after?: string },
+  ): Promise<PancakeApiResponse> {
+    const client = this.clientForPage(pageId);
+
+    try {
+      const query: Record<string, any> = {};
+      if (params?.limit) query.limit = params.limit;
+      if (params?.before) query.before = params.before;
+      if (params?.after) query.after = params.after;
+
+      const res = await client.get(
+        `/v1/pages/${pageId}/conversations/${conversationId}/messages`,
+        { params: query },
+      );
+
+      return res.data;
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to get messages for ${conversationId} on page ${pageId}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Fetch conversations for a page (backup sync).
    * Supports pagination. Returns the raw API response.
    */

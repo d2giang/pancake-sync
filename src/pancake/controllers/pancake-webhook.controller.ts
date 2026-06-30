@@ -5,9 +5,10 @@ import { LocalCacheService } from '../services/local-cache.service';
 import { mapConversationToSummary } from '../mappers/pancake-conversation.mapper';
 import { mapMessageToNormalized } from '../mappers/pancake-message.mapper';
 import {
-  PancakeMessagingWebhookPayload,
-  LaravelMessagingPayload,
-} from '../interfaces/pancake.interface';
+  buildLaravelConversationFields,
+  buildLaravelMessageFields,
+} from '../mappers/laravel-payload.mapper';
+import { PancakeMessagingWebhookPayload } from '../interfaces/pancake.interface';
 import {
   isMessagingWebhookEnabled,
   isForwardMessagingEvents,
@@ -86,20 +87,33 @@ export class PancakeWebhookController {
 
       // 4. Forward to Laravel (respect forward flag)
       if (isForwardMessagingEvents()) {
-        const payload: LaravelMessagingPayload = {
+        const occurredAt = new Date().toISOString();
+
+        // 4a. Ensure the candidate exists/is matched. Laravel's
+        // handleMessagingEvent() reads flat fields (facebook_id,
+        // customer_name, pancake_customer_id, ...), so the conversation
+        // summary must be flattened rather than nested.
+        await this.forwardService.forwardToLaravel({
           event_version: '1.0',
           event: 'pancake_messaging',
           action: 'conversation_message_received',
-          occurred_at: new Date().toISOString(),
+          occurred_at: occurredAt,
           page_id: pageId,
           conversation_id: conversationId,
-          conversation_summary: summary,
-          message: normalizedMessage,
-          raw_conversation_data: conversation,
-          raw_message_data: message,
-        };
+          ...buildLaravelConversationFields(summary),
+        });
 
-        await this.forwardService.forwardToLaravel(payload);
+        // 4b. Persist the actual message. Laravel only stores message
+        // content via the 'message_received' event handler.
+        await this.forwardService.forwardToLaravel({
+          event_version: '1.0',
+          event: 'message_received',
+          action: 'conversation_message_received',
+          occurred_at: occurredAt,
+          page_id: pageId,
+          conversation_id: conversationId,
+          ...buildLaravelMessageFields(pageId, conversationId, normalizedMessage),
+        });
       }
 
       // Success handled silently — errors go to catch block
