@@ -222,7 +222,9 @@ export class PancakeInternalController {
    * Manually trigger full conversation sync for all pages.
    */
   @Post('sync/trigger')
-  async triggerSync() {
+  async triggerSync(@Headers() headers: Record<string, string>) {
+    this.verifySecret(headers);
+
     try {
       await this.syncService.syncAllPages();
       return { success: true, message: 'Sync triggered' };
@@ -239,7 +241,9 @@ export class PancakeInternalController {
    * Manually trigger no-response check.
    */
   @Post('no-response/trigger')
-  async triggerNoResponse() {
+  async triggerNoResponse(@Headers() headers: Record<string, string>) {
+    this.verifySecret(headers);
+
     try {
       await this.noResponseService.checkAllPages();
       return { success: true, message: 'No-response check triggered' };
