@@ -49,9 +49,14 @@ export class PancakeWebhookController {
 
       const eventType = String(data.event_type || '');
 
-      // Only handle messaging webhooks
+      // Any event this service doesn't specifically normalize gets relayed
+      // as-is to Laravel's legacy /api/webhook endpoint, preserving current
+      // behavior there (e.g. comment events, other Pancake native events)
+      // now that Pancake's webhook URL points here instead of directly at
+      // Laravel.
       if (eventType !== 'messaging') {
-        this.logger.debug(`Ignoring non-messaging event: ${eventType}`);
+        this.logger.debug(`Relaying non-messaging event to legacy endpoint: ${eventType || (data as any).event}`);
+        await this.forwardService.forwardToLegacyLaravel(data as Record<string, any>);
         return res.status(200).json({ success: true, message: 'OK' });
       }
 

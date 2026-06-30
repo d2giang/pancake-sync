@@ -45,7 +45,7 @@ export class WebhookController {
         return res.status(400).type('text/plain').send('Bad Request');
       }
 
-      this.service.cleanOldPendingRefs();
+      this.service.cleanOldPendingRefs().catch(() => undefined);
 
       this.service.logLine('Webhook POST received', {
         object: data.object || null,

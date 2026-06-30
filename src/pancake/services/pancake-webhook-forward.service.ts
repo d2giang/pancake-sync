@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import {
   getLaravelWebhookUrl,
+  getLaravelLegacyWebhookUrl,
   getLaravelWebhookSecret,
   getLaravelWebhookTimeout,
   getLaravelWebhookRetryCount,
@@ -13,14 +14,33 @@ export class PancakeWebhookForwardService {
   private readonly logger = new Logger(PancakeWebhookForwardService.name);
 
   /**
-   * Forward payload to Laravel webhook.
+   * Forward payload to Laravel's new webhook endpoint (/api/webhooks/pancake).
    * Retries on network errors only (not on 4xx/5xx responses).
    */
   async forwardToLaravel(payload: Record<string, any>): Promise<boolean> {
-    const url = getLaravelWebhookUrl();
+    return this.postToLaravel(getLaravelWebhookUrl(), payload, 'LARAVEL_WEBHOOK_URL');
+  }
 
+  /**
+   * Relay a raw, unmodified Pancake webhook payload to Laravel's legacy
+   * endpoint (/api/webhook) — used for any event this service doesn't
+   * specifically normalize, so existing Laravel-side handling keeps working.
+   */
+  async forwardToLegacyLaravel(payload: Record<string, any>): Promise<boolean> {
+    return this.postToLaravel(
+      getLaravelLegacyWebhookUrl(),
+      payload,
+      'LARAVEL_LEGACY_WEBHOOK_URL',
+    );
+  }
+
+  private async postToLaravel(
+    url: string,
+    payload: Record<string, any>,
+    envVarName: string,
+  ): Promise<boolean> {
     if (!url) {
-      this.logger.debug('LARAVEL_WEBHOOK_URL not set, skipping forward');
+      this.logger.debug(`${envVarName} not set, skipping forward`);
       return false;
     }
 

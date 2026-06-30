@@ -96,6 +96,21 @@ export function getLaravelWebhookUrl(): string {
   return (process.env.LARAVEL_WEBHOOK_URL || '').trim();
 }
 
+export function getLaravelApiBaseUrl(): string {
+  return (process.env.LARAVEL_API_BASE_URL || '').trim().replace(/\/$/, '');
+}
+
+/**
+ * Legacy Laravel endpoint (`/api/webhook`) — used to passthrough-relay any
+ * Pancake native webhook event this service doesn't specifically normalize
+ * (everything except event_type=messaging), so existing Laravel-side
+ * handling (PancakeWebhookService) keeps working unchanged after Pancake's
+ * webhook URL is pointed at this service instead of Laravel directly.
+ */
+export function getLaravelLegacyWebhookUrl(): string {
+  return (process.env.LARAVEL_LEGACY_WEBHOOK_URL || '').trim();
+}
+
 export function getLaravelWebhookSecret(): string {
   return (process.env.LARAVEL_WEBHOOK_SECRET || '').trim();
 }
