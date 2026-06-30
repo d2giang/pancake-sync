@@ -211,6 +211,11 @@ export class PancakeApiService {
         params: query,
       });
 
+      // Diagnostic: log first sync to verify API connectivity
+      this.logger.log(
+        `Pancake conversations API response: status=${res.status}, entries=${Array.isArray(res.data?.data) ? res.data.data.length : Array.isArray(res.data?.entries) ? res.data.entries.length : Array.isArray(res.data) ? res.data.length : 'unknown'}`,
+      );
+
       return res.data;
     } catch (error: any) {
       this.logger.error(
