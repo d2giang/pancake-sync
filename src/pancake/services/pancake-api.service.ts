@@ -260,18 +260,7 @@ export class PancakeApiService {
 
       // Diagnostic: log first sync to verify API connectivity
       this.logger.log(
-        `Pancake conversations API response: status=${res.status}, entries=${Array.isArray(res.data?.data) ? res.data.data.length : Array.isArray(res.data?.entries) ? res.data.entries.length : Array.isArray(res.data) ? res.data.length : 'unknown'}`,
-      );
-
-      // TEMP DIAGNOSTIC: real response shape doesn't match data/entries/array
-      // assumptions above (entries logs as "unknown"). Log the actual
-      // top-level keys + a truncated sample so we can see the real field
-      // name holding the conversation list, then remove this block.
-      this.logger.log(
-        `Pancake conversations RAW response keys: ${JSON.stringify(Object.keys(res.data || {}))}`,
-      );
-      this.logger.log(
-        `Pancake conversations RAW response sample: ${JSON.stringify(res.data).slice(0, 1500)}`,
+        `Pancake conversations API response: status=${res.status}, entries=${Array.isArray(res.data?.conversations) ? res.data.conversations.length : 'unknown'}`,
       );
 
       return res.data;

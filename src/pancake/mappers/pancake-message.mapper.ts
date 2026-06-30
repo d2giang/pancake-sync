@@ -15,7 +15,9 @@ export function mapMessageToNormalized(
   const senderName = String(raw.from?.name || '');
   const messageId = String(raw.message_id || raw.id || '');
   const conversationId = String(raw.conversation_id || '');
-  const createdTime = String(raw.created_time || '');
+  // `created_time` doesn't exist on the real API response (mirrors the
+  // conversation object, which uses `inserted_at`/`updated_at` too).
+  const createdTime = String(raw.created_time || raw.inserted_at || raw.updated_at || '');
   const messageText = String(raw.message || '');
   const attachments: any[] = Array.isArray(raw.attachments) ? raw.attachments : [];
   const sticker = raw.sticker || null;

@@ -281,25 +281,12 @@ export class PancakeConversationSyncService {
         conversationId,
       );
 
-      // TEMP DIAGNOSTIC: response shape unconfirmed for this endpoint —
-      // log it once so the real field name can be added below, mirroring
-      // what we just learned for getConversations() (`conversations`, not
-      // `data`/`entries`). Remove once confirmed.
-      this.logger.log(
-        `Pancake messages RAW response keys: ${JSON.stringify(Object.keys(response || {}))}`,
-      );
-
       const rawMessages: any[] =
         response?.messages ||
-        response?.conversations ||
-        response?.data ||
-        response?.entries ||
         (Array.isArray(response) ? response : []);
 
       if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
-        this.logger.warn(
-          `No messages found in response for ${conversationId} — check RAW response keys log above for the real field name.`,
-        );
+        this.logger.warn(`No messages found for conversation ${conversationId}`);
         return;
       }
 
