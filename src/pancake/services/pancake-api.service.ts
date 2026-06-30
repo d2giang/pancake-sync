@@ -61,7 +61,10 @@ export class PancakeApiService {
     const client = this.clientForPage(pageId);
 
     try {
-      const body: Record<string, any> = {};
+      // 'reply_inbox' = replying inside a Messenger conversation. The other
+      // allowed values (reply_comment, private_replies) are for comment
+      // moderation flows, not used by this internal send-message API.
+      const body: Record<string, any> = { action: 'reply_inbox' };
 
       if (payload.message) {
         body.message = payload.message;
