@@ -300,6 +300,7 @@ export class PancakeApiService {
       const response = await this.getConversations(pageId, { limit });
 
       const rawEntries: any[] =
+        response?.conversations ||
         response?.data ||
         response?.entries ||
         (Array.isArray(response) ? response : []);

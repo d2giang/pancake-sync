@@ -15,11 +15,18 @@ export function mapConversationToSummary(
   const raw = conversation || {};
 
   // Extract basic identity fields
+  const firstCustomer = Array.isArray(raw.customers) && raw.customers.length > 0
+    ? raw.customers[0]
+    : null;
   const pageId = String(raw.page_id || '');
   const conversationId = String(raw.conversation_id || raw.id || '');
-  const customerName = String(raw.customer_name || '');
-  const customerFbId = String(raw.customer_fb_id || raw.facebook_id || raw.customer_psid || '');
-  const customerId = String(raw.customer_id || '');
+  // Real API shape (confirmed): no `customer_name`/`facebook_id` fields —
+  // customer identity lives in `from` (the message sender) and `customers[]`.
+  const customerName = String(raw.customer_name || raw.from?.name || firstCustomer?.name || '');
+  const customerFbId = String(
+    raw.customer_fb_id || raw.facebook_id || raw.customer_psid || raw.from?.id || firstCustomer?.fb_id || '',
+  );
+  const customerId = String(raw.customer_id || firstCustomer?.id || '');
   const type = String(raw.type || 'INBOX');
   const snippet = String(raw.snippet || '');
   const seen = !!raw.seen;
@@ -34,7 +41,11 @@ export function mapConversationToSummary(
     : {};
 
   // Timestamps
-  const lastMessageAt = String(raw.last_message_at || '');
+  // `last_message_at` doesn't exist on the real API response — fall back to
+  // `updated_at` (confirmed present), which tracks the conversation's last
+  // activity. The granular last_customer/page/admin/bot_message_at fields
+  // below are NOT confirmed present on this endpoint; left as best-effort.
+  const lastMessageAt = String(raw.last_message_at || raw.updated_at || '');
   const lastCustomerMessageAt = raw.last_customer_message_at
     ? String(raw.last_customer_message_at)
     : null;
@@ -88,12 +99,15 @@ export function mapConversationToSummary(
     ? String(raw.read_watermark_at)
     : null;
 
-  // Tags
+  // Tags — real API: array can contain `null` entries, and the label field
+  // is `text`, not `name`.
   const tags: { id: string; name: string }[] = Array.isArray(raw.tags)
-    ? raw.tags.map((tag: any) => ({
-        id: String(tag?.id || ''),
-        name: String(tag?.name || ''),
-      }))
+    ? raw.tags
+        .filter((tag: any) => tag != null)
+        .map((tag: any) => ({
+          id: String(tag?.id || ''),
+          name: String(tag?.text || tag?.name || ''),
+        }))
     : [];
 
   // Assignee
