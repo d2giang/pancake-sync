@@ -44,32 +44,30 @@ export class RealtimeGateway
       return;
     }
 
-    // Verify token asynchronously — disconnect if Laravel rejects it.
-    // We fire-and-forget so the socket handshake doesn't block; the client
-    // stays in an unverified limbo for < 1s then gets cut if invalid.
-    this.verifyTokenAsync(client, token);
+    // Token present — accept connection immediately to avoid the race condition
+    // where async verification closes the socket while the WS handshake is still
+    // in progress ("closed before established").
+    // Fine-grained authorization (verify token against Laravel GET /api/me) is
+    // handled lazily in handleJoinPage / handleJoinConversation when it matters.
+    this.logger.log(`Socket connected: id=${client.id}`);
   }
 
-  private async verifyTokenAsync(client: Socket, token: string): Promise<void> {
+  /**
+   * Verify a Bearer token against Laravel GET /api/me.
+   * Called before allowing a client to join a room.
+   * Returns true if valid, false on 401/403/network error.
+   */
+  private async verifyToken(token: string): Promise<boolean> {
     const base = getLaravelApiBaseUrl();
-    if (!base) {
-      // Laravel URL not configured — accept the connection (fail-open in dev).
-      this.logger.log(`Socket connected (no Laravel URL, skipping verify): id=${client.id}`);
-      return;
-    }
-
+    if (!base) return true; // Dev fallback — no Laravel URL configured.
     try {
       await axios.get(`${base}/me`, {
         headers: { Authorization: token },
         timeout: 5000,
       });
-      this.logger.log(`Socket connected: id=${client.id}`);
-    } catch (error: any) {
-      const status = error.response?.status;
-      this.logger.warn(
-        `Socket rejected — token invalid [HTTP ${status ?? 'network'}] (id=${client.id})`,
-      );
-      client.disconnect(true);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -78,10 +76,15 @@ export class RealtimeGateway
   }
 
   @SubscribeMessage('join_page')
-  handleJoinPage(
+  async handleJoinPage(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { page_id: string },
-  ): { event: string; room: string } {
+  ): Promise<{ event: string; room: string } | { event: string; reason: string }> {
+    const token = client.handshake.auth?.token as string;
+    if (!await this.verifyToken(token)) {
+      client.disconnect(true);
+      return { event: 'error', reason: 'unauthorized' };
+    }
     const room = `page:${data?.page_id}`;
     client.join(room);
     this.logger.log(`Socket room joined: ${room} (id=${client.id})`);
@@ -99,10 +102,15 @@ export class RealtimeGateway
   }
 
   @SubscribeMessage('join_conversation')
-  handleJoinConversation(
+  async handleJoinConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversation_id: string },
-  ): { event: string; room: string } {
+  ): Promise<{ event: string; room: string } | { event: string; reason: string }> {
+    const token = client.handshake.auth?.token as string;
+    if (!await this.verifyToken(token)) {
+      client.disconnect(true);
+      return { event: 'error', reason: 'unauthorized' };
+    }
     const room = `conversation:${data?.conversation_id}`;
     client.join(room);
     this.logger.log(`Socket room joined: ${room} (id=${client.id})`);
