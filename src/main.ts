@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
@@ -24,6 +25,8 @@ async function bootstrap() {
       },
     }),
   );
+
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   await app.listen(port, host);
   console.log(`Server listening on ${host}:${port}`);

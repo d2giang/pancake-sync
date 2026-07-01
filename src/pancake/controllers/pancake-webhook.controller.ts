@@ -2,6 +2,7 @@ import { Controller, Post, Req, Res, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PancakeWebhookForwardService } from '../services/pancake-webhook-forward.service';
 import { LocalCacheService } from '../services/local-cache.service';
+import { RealtimeService } from '../../realtime/realtime.service';
 import { mapConversationToSummary } from '../mappers/pancake-conversation.mapper';
 import { mapMessageToNormalized } from '../mappers/pancake-message.mapper';
 import {
@@ -23,6 +24,7 @@ export class PancakeWebhookController {
   constructor(
     private readonly forwardService: PancakeWebhookForwardService,
     private readonly cache: LocalCacheService,
+    private readonly realtimeService: RealtimeService,
   ) {}
 
   /**
@@ -94,11 +96,8 @@ export class PancakeWebhookController {
       if (isForwardMessagingEvents()) {
         const occurredAt = new Date().toISOString();
 
-        // 4a. Ensure the candidate exists/is matched. Laravel's
-        // handleMessagingEvent() reads flat fields (facebook_id,
-        // customer_name, pancake_customer_id, ...), so the conversation
-        // summary must be flattened rather than nested.
-        await this.forwardService.forwardToLaravel({
+        // 4a. Ensure the candidate exists/is matched.
+        const convOk = await this.forwardService.forwardToLaravel({
           event_version: '1.0',
           event: 'pancake_messaging',
           action: 'conversation_message_received',
@@ -108,9 +107,8 @@ export class PancakeWebhookController {
           ...buildLaravelConversationFields(summary),
         });
 
-        // 4b. Persist the actual message. Laravel only stores message
-        // content via the 'message_received' event handler.
-        await this.forwardService.forwardToLaravel({
+        // 4b. Persist the actual message.
+        const msgOk = await this.forwardService.forwardToLaravel({
           event_version: '1.0',
           event: 'message_received',
           action: 'conversation_message_received',
@@ -119,6 +117,24 @@ export class PancakeWebhookController {
           conversation_id: conversationId,
           ...buildLaravelMessageFields(pageId, conversationId, normalizedMessage),
         });
+
+        // 5. Emit realtime only after Laravel confirms both saves.
+        if (convOk && msgOk) {
+          const messageId = String(normalizedMessage?.message_id || '');
+          this.realtimeService.emitMessageCreated({
+            page_id: pageId,
+            conversation_id: conversationId,
+            message_id: messageId || undefined,
+            timestamp: occurredAt,
+            source: 'pancake',
+          });
+          this.realtimeService.emitConversationUpdated({
+            page_id: pageId,
+            conversation_id: conversationId,
+            timestamp: occurredAt,
+            source: 'pancake',
+          });
+        }
       }
 
       // Success handled silently — errors go to catch block

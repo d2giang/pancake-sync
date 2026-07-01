@@ -1,5 +1,6 @@
 import { Module, OnModuleInit, Logger } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { RealtimeModule } from '../realtime/realtime.module';
 import { validateEnv } from './utils/env-validator';
 
 // Controllers
@@ -19,7 +20,7 @@ import { ConversationSyncScheduler } from './schedulers/conversation-sync.schedu
 import { NoResponseScheduler } from './schedulers/no-response.scheduler';
 
 @Module({
-  imports: [ScheduleModule.forRoot()],
+  imports: [ScheduleModule.forRoot(), RealtimeModule],
   controllers: [PancakeWebhookController, PancakeInternalController],
   providers: [
     LocalCacheService,
