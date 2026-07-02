@@ -93,17 +93,17 @@ export class PancakeConversationSyncService {
     try {
       let allConversations: PancakeConversation[] = [];
       let hasMore = true;
-      let after: string | undefined;
+      let lastC: string | undefined;
 
-      // Fetch in pages
+      // Fetch in pages — Pancake dùng last_c làm cursor pagination
       while (hasMore) {
         const params: any = { limit: pageLimit };
 
-        if (after) {
-          params.after = after;
+        if (lastC) {
+          params.last_c = lastC;
         }
 
-        // If API supports updated_since, prioritize recent ones
+        // lookbackHours=0 (full sync) → không filter thời gian, lấy toàn bộ lịch sử
         if (lookbackHours > 0) {
           const since = new Date(
             Date.now() - lookbackHours * 3600 * 1000,
@@ -132,11 +132,16 @@ export class PancakeConversationSyncService {
           allConversations = allConversations.concat(entries);
           result.total_fetched += entries.length;
 
-          // Check pagination
-          const pagination = response?.meta || response?.pagination || {};
-          after = pagination?.after || pagination?.next_cursor || null;
+          // Pancake trả last_c ở root response hoặc trong paging object
+          const nextCursor =
+            response?.last_c ||
+            response?.paging?.cursors?.last_c ||
+            response?.paging?.last_c ||
+            null;
 
-          if (!after || entries.length < pageLimit) {
+          lastC = nextCursor || undefined;
+
+          if (!lastC || entries.length < pageLimit) {
             hasMore = false;
           }
         } catch (error: any) {
@@ -236,10 +241,11 @@ export class PancakeConversationSyncService {
 
     try {
       let hasMore = true;
+      let lastC: string | undefined;
       while (hasMore) {
         const response = await this.pancakeApi.getConversations(pageId, {
           limit: pageLimit,
-          ...(after ? { after } : {}),
+          ...(lastC ? { last_c: lastC } : {}),
         });
 
         const rawEntries: any[] =
@@ -259,13 +265,17 @@ export class PancakeConversationSyncService {
           } catch {
             failed++;
           }
-          // Small delay to avoid hammering Pancake API
           await new Promise((r) => setTimeout(r, 300));
         }
 
-        const pagination = response?.meta || response?.pagination || {};
-        after = pagination?.after || pagination?.next_cursor || undefined;
-        if (!after || rawEntries.length < pageLimit) hasMore = false;
+        const nextCursor =
+          response?.last_c ||
+          response?.paging?.cursors?.last_c ||
+          response?.paging?.last_c ||
+          null;
+
+        lastC = nextCursor || undefined;
+        if (!lastC || rawEntries.length < pageLimit) hasMore = false;
       }
     } catch (err: any) {
       this.logger.error(`Full message backfill for page ${pageId} failed: ${err.message}`);

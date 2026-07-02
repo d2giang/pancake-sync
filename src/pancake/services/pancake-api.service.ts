@@ -237,8 +237,7 @@ export class PancakeApiService {
     pageId: string,
     params?: {
       limit?: number;
-      before?: string;
-      after?: string;
+      last_c?: string;   // Pancake pagination cursor (replaces after/before)
       updated_since?: string;
       updated_until?: string;
     },
@@ -249,8 +248,7 @@ export class PancakeApiService {
       const query: Record<string, any> = {};
 
       if (params?.limit) query.limit = params.limit;
-      if (params?.before) query.before = params.before;
-      if (params?.after) query.after = params.after;
+      if (params?.last_c) query.last_c = params.last_c;
       if (params?.updated_since) query.updated_since = params.updated_since;
       if (params?.updated_until) query.updated_until = params.updated_until;
 
