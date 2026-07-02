@@ -176,7 +176,9 @@ export class PancakeSyncController {
       next_url: derivedLastC
         ? `/api/sync/debug/conversations/${pageId}?secret=***&last_c=${derivedLastC}`
         : null,
-      // Full raw object của entry đầu tiên để xem toàn bộ field
+      // Toàn bộ keys của entry (để xác định field nào dùng làm cursor)
+      entry_keys: entries[0] ? Object.keys(entries[0]) : [],
+      // Full raw object của entry đầu tiên
       first_entry_full: entries[0] ?? null,
       // Full raw object của entry cuối để xác định cursor
       last_entry_full: entries[entries.length - 1] ?? null,
