@@ -164,13 +164,16 @@ export class PancakeSyncController {
       (Array.isArray(raw) ? raw : []);
 
     const lastEntry = entries[entries.length - 1] as any;
-    const derivedLastC = lastEntry?.conversation_id || lastEntry?.id || null;
+    const rawLastId: string | null = lastEntry?.conversation_id || lastEntry?.id || null;
+    // Pancake cursor = chỉ phần số sau "_" trong composite "pageId_convId"
+    const derivedLastC = rawLastId ? String(rawLastId).split('_').pop() ?? null : null;
 
     return {
       total_in_page: entries.length,
       root_keys: Object.keys(raw as any),
       // Cursor dùng để lấy trang tiếp theo
       derived_last_c: derivedLastC,
+      raw_last_id: rawLastId,
       next_url: derivedLastC
         ? `/api/sync/debug/conversations/${pageId}?secret=***&last_c=${derivedLastC}`
         : null,

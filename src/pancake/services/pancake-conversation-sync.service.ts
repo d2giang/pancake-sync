@@ -132,10 +132,12 @@ export class PancakeConversationSyncService {
           allConversations = allConversations.concat(entries);
           result.total_fetched += entries.length;
 
-          // Pancake không trả cursor trong response — dùng ID của conversation
-          // cuối cùng làm last_c cho trang tiếp theo (cursor-based, giống FB Graph API).
+          // Pancake cursor = phần số sau dấu "_" trong composite ID "pageId_convId".
+          // Ví dụ: "331141913426390_26787637794269924" → last_c = "26787637794269924".
+          // Truyền nguyên composite ID thì Pancake bỏ qua cursor và trả lại trang 1.
           const lastEntry = entries[entries.length - 1] as any;
-          lastC = lastEntry?.conversation_id || lastEntry?.id || undefined;
+          const rawLastId: string | undefined = lastEntry?.conversation_id || lastEntry?.id || undefined;
+          lastC = rawLastId ? String(rawLastId).split('_').pop() : undefined;
 
           // Dừng khi trang trả về ít hơn pageLimit (đã hết data)
           if (!lastC || entries.length < pageLimit) {
@@ -266,7 +268,8 @@ export class PancakeConversationSyncService {
         }
 
         const lastEntry = rawEntries[rawEntries.length - 1] as any;
-        lastC = lastEntry?.conversation_id || lastEntry?.id || undefined;
+        const rawLastId: string | undefined = lastEntry?.conversation_id || lastEntry?.id || undefined;
+        lastC = rawLastId ? String(rawLastId).split('_').pop() : undefined;
         if (!lastC || rawEntries.length < pageLimit) hasMore = false;
       }
     } catch (err: any) {
