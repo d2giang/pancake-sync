@@ -52,30 +52,37 @@ export class PancakeSyncController {
    * Trigger full sync for all configured pages (conversations only, no messages).
    */
   @Get('conversations')
-  async syncAllConversations(@Query('secret') secret?: string) {
+  async syncAllConversations(
+    @Query('secret') secret?: string,
+    @Query('full') full?: string,
+  ) {
     const check = this.checkSecret(secret);
     if (!check.ok) return { success: false, error: check.error };
 
-    this.logger.log('Manual sync triggered via GET /api/sync/conversations');
-    await this.syncService.syncAllPages();
-    return { success: true, message: 'Conversation sync completed' };
+    const isFull = full === '1' || full === 'true';
+    this.logger.log(`Manual sync triggered: full=${isFull}`);
+    await this.syncService.syncAllPages(isFull);
+    return { success: true, message: `Conversation sync completed (full=${isFull})` };
   }
 
   /**
    * GET /api/sync/conversations/:pageId
    * Trigger conversation sync for a single page.
+   * ?full=1 → bỏ filter thời gian, lấy toàn bộ lịch sử.
    */
   @Get('conversations/:pageId')
   async syncPageConversations(
     @Param('pageId') pageId: string,
     @Query('secret') secret?: string,
+    @Query('full') full?: string,
   ) {
     const check = this.checkSecret(secret);
     if (!check.ok) return { success: false, error: check.error };
 
-    this.logger.log(`Manual page sync triggered: page=${pageId}`);
-    await this.syncService.syncPageOnly(pageId);
-    return { success: true, message: `Conversations synced for page ${pageId}` };
+    const isFull = full === '1' || full === 'true';
+    this.logger.log(`Manual page sync triggered: page=${pageId} full=${isFull}`);
+    await this.syncService.syncPageOnly(pageId, isFull);
+    return { success: true, message: `Conversations synced for page ${pageId} (full=${isFull})` };
   }
 
   /**

@@ -35,7 +35,7 @@ export class PancakeConversationSyncService {
    * Backup sync conversations for all configured pages.
    * Runs on a scheduler. Designed to be idempotent.
    */
-  async syncAllPages(): Promise<void> {
+  async syncAllPages(full = false): Promise<void> {
     if (this.isSyncing) {
       this.logger.warn('Sync already in progress, skipping.');
       return;
@@ -53,10 +53,10 @@ export class PancakeConversationSyncService {
         return;
       }
 
-      this.logger.log(`Starting conversation sync for ${pageIds.length} pages…`);
+      this.logger.log(`Starting conversation sync for ${pageIds.length} pages… (full=${full})`);
 
       for (const pageId of pageIds) {
-        await this.syncPageConversations(pageId);
+        await this.syncPageConversations(pageId, full ? 0 : undefined);
         // Small delay between pages to avoid rate limiting
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
@@ -74,11 +74,13 @@ export class PancakeConversationSyncService {
    * Sync a single page's conversations.
    * Prioritizes conversations updated in the last lookback period.
    */
-  private async syncPageConversations(pageId: string): Promise<void> {
+  private async syncPageConversations(pageId: string, lookbackHoursOverride?: number): Promise<void> {
     const pageLimit =
       Number(process.env.PANCAKE_CONVERSATION_SYNC_PAGE_LIMIT || 50) || 50;
     const lookbackHours =
-      Number(process.env.PANCAKE_CONVERSATION_SYNC_LOOKBACK_HOURS || 48) || 48;
+      lookbackHoursOverride !== undefined
+        ? lookbackHoursOverride
+        : Number(process.env.PANCAKE_CONVERSATION_SYNC_LOOKBACK_HOURS || 48) || 48;
 
     const result: SyncResult = {
       total_fetched: 0,
@@ -213,10 +215,10 @@ export class PancakeConversationSyncService {
 
   /**
    * Sync conversations for a single page (no message backfill).
-   * Public entry-point for the sync controller GET route.
+   * full=true → bỏ filter updated_since, lấy toàn bộ lịch sử.
    */
-  async syncPageOnly(pageId: string): Promise<void> {
-    await this.syncPageConversations(pageId);
+  async syncPageOnly(pageId: string, full = false): Promise<void> {
+    await this.syncPageConversations(pageId, full ? 0 : undefined);
   }
 
   /**
