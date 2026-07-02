@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Query, Logger } from '@nestjs/common';
 import { PancakeConversationSyncService } from '../services/pancake-conversation-sync.service';
+import { PancakeApiService } from '../services/pancake-api.service';
 import { getAllPageIds } from '../utils/env-validator';
 
 /**
@@ -13,7 +14,10 @@ import { getAllPageIds } from '../utils/env-validator';
 export class PancakeSyncController {
   private readonly logger = new Logger(PancakeSyncController.name);
 
-  constructor(private readonly syncService: PancakeConversationSyncService) {}
+  constructor(
+    private readonly syncService: PancakeConversationSyncService,
+    private readonly pancakeApi: PancakeApiService,
+  ) {}
 
   private checkSecret(secret?: string): { ok: boolean; error?: string } {
     const expected = (process.env.INTERNAL_API_SECRET || '').trim();
@@ -129,6 +133,51 @@ export class PancakeSyncController {
     return {
       success: true,
       message: `Full message backfill started for page ${pageId}. Check server logs for progress.`,
+    };
+  }
+
+  /**
+   * GET /api/sync/debug/conversations/:pageId
+   * Trả raw response từ Pancake API (1 trang) để kiểm tra cấu trúc pagination.
+   * ?last_c=xxx để test cursor trang tiếp theo.
+   */
+  @Get('debug/conversations/:pageId')
+  async debugConversations(
+    @Param('pageId') pageId: string,
+    @Query('secret') secret?: string,
+    @Query('last_c') lastC?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const check = this.checkSecret(secret);
+    if (!check.ok) return { success: false, error: check.error };
+
+    const raw = await this.pancakeApi.getConversations(pageId, {
+      limit: limit ? Number(limit) : 5,
+      ...(lastC ? { last_c: lastC } : {}),
+    });
+
+    // Trả toàn bộ raw response để xem cấu trúc cursor
+    const entries: any[] =
+      (raw as any)?.conversations ||
+      (raw as any)?.data ||
+      (raw as any)?.entries ||
+      (Array.isArray(raw) ? raw : []);
+
+    return {
+      total_in_page: entries.length,
+      // Các field cursor có thể có
+      last_c: (raw as any)?.last_c ?? null,
+      paging: (raw as any)?.paging ?? null,
+      meta: (raw as any)?.meta ?? null,
+      pagination: (raw as any)?.pagination ?? null,
+      // Toàn bộ keys ở root (để phát hiện field lạ)
+      root_keys: Object.keys(raw as any),
+      // 2 conversation đầu để confirm data
+      sample: entries.slice(0, 2).map((c: any) => ({
+        id: c.id,
+        conversation_id: c.conversation_id,
+        customer_name: c.customer_name,
+      })),
     };
   }
 }
