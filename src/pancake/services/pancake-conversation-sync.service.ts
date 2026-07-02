@@ -132,15 +132,12 @@ export class PancakeConversationSyncService {
           allConversations = allConversations.concat(entries);
           result.total_fetched += entries.length;
 
-          // Pancake trả last_c ở root response hoặc trong paging object
-          const nextCursor =
-            response?.last_c ||
-            response?.paging?.cursors?.last_c ||
-            response?.paging?.last_c ||
-            null;
+          // Pancake không trả cursor trong response — dùng ID của conversation
+          // cuối cùng làm last_c cho trang tiếp theo (cursor-based, giống FB Graph API).
+          const lastEntry = entries[entries.length - 1] as any;
+          lastC = lastEntry?.conversation_id || lastEntry?.id || undefined;
 
-          lastC = nextCursor || undefined;
-
+          // Dừng khi trang trả về ít hơn pageLimit (đã hết data)
           if (!lastC || entries.length < pageLimit) {
             hasMore = false;
           }
@@ -268,13 +265,8 @@ export class PancakeConversationSyncService {
           await new Promise((r) => setTimeout(r, 300));
         }
 
-        const nextCursor =
-          response?.last_c ||
-          response?.paging?.cursors?.last_c ||
-          response?.paging?.last_c ||
-          null;
-
-        lastC = nextCursor || undefined;
+        const lastEntry = rawEntries[rawEntries.length - 1] as any;
+        lastC = lastEntry?.conversation_id || lastEntry?.id || undefined;
         if (!lastC || rawEntries.length < pageLimit) hasMore = false;
       }
     } catch (err: any) {
