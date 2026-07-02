@@ -171,15 +171,15 @@ export class PancakeSyncController {
     return {
       total_in_page: entries.length,
       root_keys: Object.keys(raw as any),
-      // Cursor dùng để lấy trang tiếp theo
       derived_last_c: derivedLastC,
       raw_last_id: rawLastId,
       next_url: derivedLastC
         ? `/api/sync/debug/conversations/${pageId}?secret=***&last_c=${derivedLastC}`
         : null,
-      // 2 đầu + 2 cuối để confirm thứ tự
-      sample_first: entries.slice(0, 2).map((c: any) => ({ id: c.id, conversation_id: c.conversation_id, customer_name: c.customer_name })),
-      sample_last: entries.slice(-2).map((c: any) => ({ id: c.id, conversation_id: c.conversation_id, customer_name: c.customer_name })),
+      // Full raw object của entry đầu tiên để xem toàn bộ field
+      first_entry_full: entries[0] ?? null,
+      // Full raw object của entry cuối để xác định cursor
+      last_entry_full: entries[entries.length - 1] ?? null,
     };
   }
 }
