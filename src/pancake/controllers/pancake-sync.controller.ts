@@ -1,0 +1,127 @@
+import { Controller, Get, Param, Query, Logger } from '@nestjs/common';
+import { PancakeConversationSyncService } from '../services/pancake-conversation-sync.service';
+import { getAllPageIds } from '../utils/env-validator';
+
+/**
+ * Public GET routes for triggering sync operations via browser/curl.
+ * Pattern: GET /api/sync/... (no body, optional ?secret= for protection).
+ *
+ * Protected by INTERNAL_API_SECRET env var (query param ?secret=xxx).
+ * If INTERNAL_API_SECRET is not set, all routes are open (dev mode).
+ */
+@Controller('api/sync')
+export class PancakeSyncController {
+  private readonly logger = new Logger(PancakeSyncController.name);
+
+  constructor(private readonly syncService: PancakeConversationSyncService) {}
+
+  private checkSecret(secret?: string): { ok: boolean; error?: string } {
+    const expected = (process.env.INTERNAL_API_SECRET || '').trim();
+    if (!expected) return { ok: true }; // dev fallback — no secret configured
+    if (!secret || secret.trim() !== expected) {
+      return { ok: false, error: 'Invalid or missing ?secret= param' };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * GET /api/sync/status
+   * List configured pages and sync settings.
+   */
+  @Get('status')
+  getStatus(@Query('secret') secret?: string) {
+    const check = this.checkSecret(secret);
+    if (!check.ok) return { success: false, error: check.error };
+
+    const pageIds = getAllPageIds();
+    return {
+      success: true,
+      pages: pageIds,
+      settings: {
+        sync_enabled: process.env.PANCAKE_CONVERSATION_SYNC_ENABLED !== 'false',
+        cron: process.env.PANCAKE_CONVERSATION_SYNC_CRON || '*/30 * * * *',
+        lookback_hours: Number(process.env.PANCAKE_CONVERSATION_SYNC_LOOKBACK_HOURS || 48),
+        forward_conversations: process.env.FORWARD_CONVERSATION_EVENTS !== 'false',
+        forward_messaging: process.env.FORWARD_MESSAGING_EVENTS !== 'false',
+      },
+    };
+  }
+
+  /**
+   * GET /api/sync/conversations
+   * Trigger full sync for all configured pages (conversations only, no messages).
+   */
+  @Get('conversations')
+  async syncAllConversations(@Query('secret') secret?: string) {
+    const check = this.checkSecret(secret);
+    if (!check.ok) return { success: false, error: check.error };
+
+    this.logger.log('Manual sync triggered via GET /api/sync/conversations');
+    await this.syncService.syncAllPages();
+    return { success: true, message: 'Conversation sync completed' };
+  }
+
+  /**
+   * GET /api/sync/conversations/:pageId
+   * Trigger conversation sync for a single page.
+   */
+  @Get('conversations/:pageId')
+  async syncPageConversations(
+    @Param('pageId') pageId: string,
+    @Query('secret') secret?: string,
+  ) {
+    const check = this.checkSecret(secret);
+    if (!check.ok) return { success: false, error: check.error };
+
+    this.logger.log(`Manual page sync triggered: page=${pageId}`);
+    await this.syncService.syncPageOnly(pageId);
+    return { success: true, message: `Conversations synced for page ${pageId}` };
+  }
+
+  /**
+   * GET /api/sync/messages/:pageId/:conversationId
+   * Trigger full message backfill for a single conversation (all pages, paginated).
+   */
+  @Get('messages/:pageId/:conversationId')
+  async backfillMessages(
+    @Param('pageId') pageId: string,
+    @Param('conversationId') conversationId: string,
+    @Query('secret') secret?: string,
+  ) {
+    const check = this.checkSecret(secret);
+    if (!check.ok) return { success: false, error: check.error };
+
+    this.logger.log(`Manual message backfill: page=${pageId} conv=${conversationId}`);
+    const result = await this.syncService.syncSingleConversation(pageId, conversationId);
+    return {
+      success: result.success,
+      message: result.success
+        ? `Messages backfilled for conversation ${conversationId}`
+        : 'Backfill failed — check logs',
+    };
+  }
+
+  /**
+   * GET /api/sync/messages/:pageId
+   * Trigger message backfill for ALL conversations of a page.
+   * Heavy operation — use with caution on production.
+   */
+  @Get('messages/:pageId')
+  async backfillAllMessages(
+    @Param('pageId') pageId: string,
+    @Query('secret') secret?: string,
+  ) {
+    const check = this.checkSecret(secret);
+    if (!check.ok) return { success: false, error: check.error };
+
+    this.logger.log(`Manual full message backfill triggered: page=${pageId}`);
+    // Run async — don't block the HTTP response for large pages
+    this.syncService.backfillAllConversationMessages(pageId).catch((err) =>
+      this.logger.error(`Full message backfill failed: ${err.message}`),
+    );
+    return {
+      success: true,
+      message: `Full message backfill started for page ${pageId}. Check server logs for progress.`,
+    };
+  }
+}

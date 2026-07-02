@@ -6,6 +6,7 @@ import { validateEnv } from './utils/env-validator';
 // Controllers
 import { PancakeWebhookController } from './controllers/pancake-webhook.controller';
 import { PancakeInternalController } from './controllers/pancake-internal.controller';
+import { PancakeSyncController } from './controllers/pancake-sync.controller';
 
 // Services
 import { LocalCacheService } from './services/local-cache.service';
@@ -21,7 +22,7 @@ import { NoResponseScheduler } from './schedulers/no-response.scheduler';
 
 @Module({
   imports: [ScheduleModule.forRoot(), RealtimeModule],
-  controllers: [PancakeWebhookController, PancakeInternalController],
+  controllers: [PancakeWebhookController, PancakeInternalController, PancakeSyncController],
   providers: [
     LocalCacheService,
     PancakeApiService,

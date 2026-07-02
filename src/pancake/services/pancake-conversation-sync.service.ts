@@ -212,6 +212,69 @@ export class PancakeConversationSyncService {
   }
 
   /**
+   * Sync conversations for a single page (no message backfill).
+   * Public entry-point for the sync controller GET route.
+   */
+  async syncPageOnly(pageId: string): Promise<void> {
+    await this.syncPageConversations(pageId);
+  }
+
+  /**
+   * Backfill ALL conversation messages for a page.
+   * Fetches the conversation list first, then backfills each one sequentially.
+   * Designed to be called once manually — not on the cron scheduler.
+   */
+  async backfillAllConversationMessages(pageId: string): Promise<void> {
+    this.logger.log(`Starting full message backfill for page ${pageId}…`);
+    const pageLimit = Number(process.env.PANCAKE_CONVERSATION_SYNC_PAGE_LIMIT || 50) || 50;
+    let after: string | undefined;
+    let total = 0;
+    let done = 0;
+    let failed = 0;
+
+    try {
+      let hasMore = true;
+      while (hasMore) {
+        const response = await this.pancakeApi.getConversations(pageId, {
+          limit: pageLimit,
+          ...(after ? { after } : {}),
+        });
+
+        const rawEntries: any[] =
+          response?.conversations || response?.data || response?.entries ||
+          (Array.isArray(response) ? response : []);
+
+        if (!rawEntries.length) break;
+
+        total += rawEntries.length;
+
+        for (const conv of rawEntries) {
+          const convId = String(conv.conversation_id || conv.id || '');
+          if (!convId) continue;
+          try {
+            await this.backfillMessages(pageId, convId);
+            done++;
+          } catch {
+            failed++;
+          }
+          // Small delay to avoid hammering Pancake API
+          await new Promise((r) => setTimeout(r, 300));
+        }
+
+        const pagination = response?.meta || response?.pagination || {};
+        after = pagination?.after || pagination?.next_cursor || undefined;
+        if (!after || rawEntries.length < pageLimit) hasMore = false;
+      }
+    } catch (err: any) {
+      this.logger.error(`Full message backfill for page ${pageId} failed: ${err.message}`);
+    }
+
+    this.logger.log(
+      `Full message backfill for page ${pageId} done: conversations=${total} backfilled=${done} failed=${failed}`,
+    );
+  }
+
+  /**
    * Sync a single conversation on demand (used by internal API).
    */
   async syncSingleConversation(
@@ -269,45 +332,63 @@ export class PancakeConversationSyncService {
   }
 
   /**
-   * Fetch and forward message history for a single conversation.
+   * Fetch and forward ALL message history for a single conversation (paginated).
+   * Loops through before/after cursor until no more pages.
    * Errors are logged but do not fail the overall sync.
    */
   private async backfillMessages(
     pageId: string,
     conversationId: string,
   ): Promise<void> {
+    const msgLimit = Number(process.env.PANCAKE_MESSAGE_BACKFILL_LIMIT || 50) || 50;
+    let totalSynced = 0;
+    let before: string | undefined;
+
     try {
-      const response = await this.pancakeApi.getConversationMessages(
-        pageId,
-        conversationId,
-      );
+      let hasMore = true;
 
-      const rawMessages: any[] =
-        response?.messages ||
-        (Array.isArray(response) ? response : []);
+      while (hasMore) {
+        const response = await this.pancakeApi.getConversationMessages(
+          pageId,
+          conversationId,
+          { limit: msgLimit, ...(before ? { before } : {}) },
+        );
 
-      if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
-        this.logger.warn(`No messages found for conversation ${conversationId}`);
-        return;
+        const rawMessages: any[] =
+          response?.messages ||
+          response?.data ||
+          response?.entries ||
+          (Array.isArray(response) ? response : []);
+
+        if (!Array.isArray(rawMessages) || rawMessages.length === 0) break;
+
+        for (const raw of rawMessages) {
+          const normalized = mapMessageToNormalized(raw, pageId);
+          await this.forwardService.forwardToLaravel({
+            event_version: '1.0',
+            event: 'message_received',
+            action: 'conversation_message_received',
+            occurred_at: new Date().toISOString(),
+            page_id: pageId,
+            conversation_id: conversationId,
+            ...buildLaravelMessageFields(pageId, conversationId, normalized),
+          });
+        }
+
+        totalSynced += rawMessages.length;
+
+        // Pancake messages: newest first, paginate backwards via `before` cursor
+        const pagination = response?.meta || response?.pagination || {};
+        before = pagination?.before || pagination?.prev_cursor || undefined;
+
+        if (!before || rawMessages.length < msgLimit) hasMore = false;
       }
 
-      for (const raw of rawMessages) {
-        const normalized = mapMessageToNormalized(raw, pageId);
-
-        await this.forwardService.forwardToLaravel({
-          event_version: '1.0',
-          event: 'message_received',
-          action: 'conversation_message_received',
-          occurred_at: new Date().toISOString(),
-          page_id: pageId,
-          conversation_id: conversationId,
-          ...buildLaravelMessageFields(pageId, conversationId, normalized),
-        });
+      if (totalSynced > 0) {
+        this.logger.log(
+          `Backfilled ${totalSynced} messages for conversation ${conversationId}`,
+        );
       }
-
-      this.logger.log(
-        `Backfilled ${rawMessages.length} messages for conversation ${conversationId}`,
-      );
     } catch (error: any) {
       this.logger.warn(
         `Message backfill failed for ${conversationId}: ${error.message}`,
