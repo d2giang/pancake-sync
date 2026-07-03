@@ -197,6 +197,10 @@ export class PancakeWebhookController {
         // 4a. Ensure the candidate exists/is matched. Conversation is saved
         // before the message below, since Laravel's message insert depends
         // on the candidate/conversation row already existing.
+        // Timed individually (not just the overall job duration) so a slow
+        // Laravel round-trip — vs. a slow NestJS cold start, vs. a slow FE
+        // socket — can be told apart from the logs alone.
+        const convStartedAt = Date.now();
         const convOk = await this.forwardService.forwardToLaravel({
           event_version: '1.0',
           event: 'pancake_messaging',
@@ -206,10 +210,12 @@ export class PancakeWebhookController {
           conversation_id: conversationId,
           ...buildLaravelConversationFields(summary),
         });
+        const convDurationMs = Date.now() - convStartedAt;
 
         // 4b. Persist the actual message. buildLaravelMessageFields attaches
         // a stable idempotency_key (hash of page/conversation/message id)
         // so Laravel can dedupe if this webhook is ever delivered twice.
+        const msgStartedAt = Date.now();
         const msgOk = await this.forwardService.forwardToLaravel({
           event_version: '1.0',
           event: 'message_received',
@@ -223,9 +229,16 @@ export class PancakeWebhookController {
             normalizedMessage,
           ),
         });
+        const msgDurationMs = Date.now() - msgStartedAt;
+
+        this.logger.log(
+          `Laravel forward timing conversation_id=${conversationId}: ` +
+            `conversation_save=${convDurationMs}ms(ok=${convOk}) message_save=${msgDurationMs}ms(ok=${msgOk})`,
+        );
 
         // 5. Emit realtime only after Laravel confirms both saves.
         if (convOk && msgOk) {
+          const emitStartedAt = Date.now();
           const messageId = String(normalizedMessage?.message_id || '');
           this.realtimeService.emitMessageCreated({
             page_id: pageId,
@@ -240,6 +253,10 @@ export class PancakeWebhookController {
             timestamp: occurredAt,
             source: 'pancake',
           });
+          this.logger.log(
+            `Realtime emitted conversation_id=${conversationId} at=${new Date().toISOString()} ` +
+              `emit_call_took=${Date.now() - emitStartedAt}ms`,
+          );
         } else {
           this.logger.warn(
             `Laravel forward incomplete for conversation_id=${conversationId}: ` +
