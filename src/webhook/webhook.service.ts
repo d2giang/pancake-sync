@@ -6,6 +6,7 @@ import * as path from 'path';
 import {
   getLaravelApiBaseUrl,
   getLaravelWebhookSecret,
+  isPancakeCrmSyncEnabled,
 } from '../pancake/utils/env-validator';
 
 type LogLevel = 'IMPORTANT' | 'ERROR' | 'DEBUG';
@@ -784,6 +785,20 @@ export class WebhookService {
     conversationId: string,
     ref: string,
   ): Promise<boolean> {
+    // Pancake's legacy CRM/table-records API (crm.pancake.vn) is being
+    // phased out — gate this single choke point rather than every call
+    // site, since every crm.pancake.vn request in this file (find record,
+    // update ref) flows through here. The ref is still captured and saved
+    // to Laravel via setPendingRef() upstream regardless of this flag.
+    if (!isPancakeCrmSyncEnabled()) {
+      this.logLine(
+        'Pancake CRM sync disabled, skipping',
+        { conversation_id: conversationId },
+        'DEBUG',
+      );
+      return false;
+    }
+
     let recordId = this.getLeadRecordId(conversationId);
 
     if (!recordId) {

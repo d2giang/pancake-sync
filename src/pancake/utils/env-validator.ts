@@ -199,6 +199,19 @@ export function getConfigFilePath(key: string, defaultPath: string): string {
   return (process.env[key] || defaultPath).trim();
 }
 
+/**
+ * Gates WebhookService.syncRefToPancake() (src/webhook/webhook.service.ts) —
+ * the only code path that calls Pancake's legacy CRM/table-records API
+ * (crm.pancake.vn, authenticated via PANCAKE_API_KEY). That product is being
+ * phased out in favor of Laravel as the CRM of record; default is off so a
+ * dead/invalid key doesn't burn cycles on failed calls + retry timers. The
+ * ref itself is still captured and persisted to Laravel via setPendingRef()
+ * regardless of this flag.
+ */
+export function isPancakeCrmSyncEnabled(): boolean {
+  return process.env.PANCAKE_CRM_SYNC_ENABLED === 'true';
+}
+
 export function isLogSyncSummary(): boolean {
   return process.env.LOG_SYNC_SUMMARY !== 'false';
 }
