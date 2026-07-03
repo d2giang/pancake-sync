@@ -25,10 +25,12 @@ export class PancakeApiService {
    * Create an Axios instance with the appropriate auth for a given page.
    * Uses PANCAKE_PAGE_TOKENS or PANCAKE_PAGE_ID/PANCAKE_PAGE_ACCESS_TOKEN env config.
    *
-   * Pancake's Public API expects the token as an `access_token` query param
-   * (Facebook Graph API style), not an Authorization header — sending it as
-   * Bearer-only produces "access_token is required" even with a valid token.
-   * Kept as a header too in case some endpoints also accept it that way.
+   * Per Pancake's API docs, every page-level endpoint under
+   * /public_api/v1|v2/pages/{page_id}/... is authenticated with the Page
+   * Access Token passed as the `page_access_token` query parameter — there
+   * is no Authorization header for either token type, and `access_token` is
+   * the *User* Access Token used only for account-level endpoints
+   * (GET /pages, generate_page_access_token), which this client doesn't call.
    */
   private clientForPage(pageId: string): AxiosInstance {
     const token = getPageToken(pageId);
@@ -40,11 +42,10 @@ export class PancakeApiService {
     return axios.create({
       baseURL: this.baseUrl,
       timeout: this.timeout,
-      params: token ? { access_token: token } : {},
+      params: token ? { page_access_token: token } : {},
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
   }
@@ -136,9 +137,7 @@ export class PancakeApiService {
 
       return res.data;
     } catch (error: any) {
-      this.logger.error(
-        `Failed to assign ${conversationId}: ${error.message}`,
-      );
+      this.logger.error(`Failed to assign ${conversationId}: ${error.message}`);
       throw error;
     }
   }
@@ -161,7 +160,9 @@ export class PancakeApiService {
 
       return res.data;
     } catch (error: any) {
-      this.logger.error(`Failed to mark read ${conversationId}: ${error.message}`);
+      this.logger.error(
+        `Failed to mark read ${conversationId}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -237,7 +238,7 @@ export class PancakeApiService {
     pageId: string,
     params?: {
       limit?: number;
-      last_c?: string;   // Pancake pagination cursor (replaces after/before)
+      last_c?: string; // Pancake pagination cursor (replaces after/before)
       updated_since?: string;
       updated_until?: string;
     },
@@ -297,8 +298,7 @@ export class PancakeApiService {
         : [];
 
       const found = entries.find(
-        (c: any) =>
-          String(c.conversation_id || c.id || '') === conversationId,
+        (c: any) => String(c.conversation_id || c.id || '') === conversationId,
       );
 
       return found || null;

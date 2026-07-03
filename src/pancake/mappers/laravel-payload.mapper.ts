@@ -1,4 +1,29 @@
-import { ConversationSummary, NormalizedMessage } from '../interfaces/pancake.interface';
+import * as crypto from 'crypto';
+import {
+  ConversationSummary,
+  NormalizedMessage,
+} from '../interfaces/pancake.interface';
+
+/**
+ * Stable idempotency key for a single Pancake message forward, so Laravel
+ * can dedupe retried/duplicate webhook deliveries. Deterministic hash of the
+ * natural key (page + conversation + message) — deliberately NOT based on a
+ * timestamp, since retries of the same message must produce the same key.
+ * Returns null when any part of the natural key is missing (nothing stable
+ * to hash on).
+ */
+export function buildMessageIdempotencyKey(
+  pageId: string,
+  conversationId: string,
+  messageId: string,
+): string | null {
+  if (!pageId || !conversationId || !messageId) return null;
+
+  return crypto
+    .createHash('sha256')
+    .update(`pancake:message:${pageId}:${conversationId}:${messageId}`)
+    .digest('hex');
+}
 
 /**
  * Flatten a ConversationSummary into the exact field names
@@ -71,7 +96,9 @@ export function buildLaravelConversationFields(
  * (capped, sent as its own field) so it's stripped here too to avoid
  * storing it twice.
  */
-export function trimRawConversationData<T extends Record<string, any>>(raw: T): T {
+export function trimRawConversationData<T extends Record<string, any>>(
+  raw: T,
+): T {
   const { assignee_histories, tag_histories, ...rest } = raw || ({} as T);
   return rest as T;
 }
@@ -85,7 +112,14 @@ export function buildLaravelMessageFields(
   conversationId: string,
   message: NormalizedMessage,
 ): Record<string, any> {
+  const idempotencyKey = buildMessageIdempotencyKey(
+    pageId,
+    conversationId,
+    message.message_id,
+  );
+
   return {
+    ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     pancake_message_id: message.message_id,
     pancake_conversation_id: conversationId,
     conversation_id: conversationId,
