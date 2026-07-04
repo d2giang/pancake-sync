@@ -1,10 +1,22 @@
-import { Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
+import { Controller, Get, Logger, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { WebhookService } from './webhook.service';
+import { PancakeWebhookForwardService } from '../pancake/services/pancake-webhook-forward.service';
+import { LocalCacheService } from '../pancake/services/local-cache.service';
+import { RealtimeService } from '../realtime/realtime.service';
+import { processPancakeMessagingWebhook } from '../pancake/services/pancake-messaging.processor';
+import { isMessagingWebhookEnabled } from '../pancake/utils/env-validator';
 
 @Controller('api/webhook')
 export class WebhookController {
-  constructor(private readonly service: WebhookService) {}
+  private readonly logger = new Logger(WebhookController.name);
+
+  constructor(
+    private readonly service: WebhookService,
+    private readonly forwardService: PancakeWebhookForwardService,
+    private readonly cache: LocalCacheService,
+    private readonly realtimeService: RealtimeService,
+  ) {}
 
   @Get()
   async handleGet(@Query() query: any, @Res() res: Response) {
@@ -45,27 +57,50 @@ export class WebhookController {
         return res.status(400).type('text/plain').send('Bad Request');
       }
 
-      // Native Pancake messaging belongs to /api/pancake/webhook. Keeping
-      // this explicit prevents a silently successful 200 on the legacy URL
-      // while no Laravel message save or Socket.IO emit takes place.
       if (data.event_type === 'messaging') {
-        this.service.logLine(
-          'Pancake messaging sent to legacy /api/webhook; configure /api/pancake/webhook',
-          {
-            page_id: data.page_id || null,
-            conversation_id:
-              data.data?.conversation?.conversation_id ||
-              data.data?.conversation?.id ||
-              null,
-            message_id:
-              data.data?.message?.message_id || data.data?.message?.id || null,
-          },
-          'ERROR',
+        if (!isMessagingWebhookEnabled()) {
+          return res
+            .status(200)
+            .json({ success: true, message: 'Webhook disabled' });
+        }
+
+        const pageId = String(data.page_id || '');
+        const conversation = data.data?.conversation;
+        const message = data.data?.message;
+        const conversationId = String(
+          conversation?.conversation_id || conversation?.id || '',
         );
-        return res.status(422).json({
-          success: false,
-          message: 'Use /api/pancake/webhook for Pancake messaging events',
-        });
+        const messageId = String(message?.message_id || message?.id || '');
+        const receivedAt = new Date().toISOString();
+
+        this.logger.log(
+          `Pancake messaging received page_id=${pageId || '(none)'} ` +
+            `conversation_id=${conversationId || '(none)'} message_id=${messageId || '(none)'}`,
+        );
+
+        if (!pageId || !conversation || !message) {
+          this.logger.warn('Missing required fields in messaging webhook');
+          return res.status(200).json({ success: true, message: 'OK' });
+        }
+
+        res.status(200).json({ success: true, message: 'EVENT_RECEIVED' });
+        void processPancakeMessagingWebhook(
+          {
+            pageId,
+            conversationId,
+            messageId,
+            conversation,
+            message,
+            receivedAt,
+          },
+          {
+            forwardService: this.forwardService,
+            cache: this.cache,
+            realtimeService: this.realtimeService,
+            logger: this.logger,
+          },
+        );
+        return;
       }
 
       this.service.cleanOldPendingRefs().catch(() => undefined);
@@ -87,6 +122,21 @@ export class WebhookController {
       ) {
         await this.service.handlePancakeWebhook(data);
         return res.status(200).type('text/plain').send('EVENT_RECEIVED');
+      }
+
+      // Other native Pancake events (comments, tags, etc.) continue to the
+      // Laravel legacy webhook. Respond first so Pancake does not retry while
+      // Laravel is processing the event.
+      if (data.event_type) {
+        res.status(200).type('text/plain').send('EVENT_RECEIVED');
+        void this.forwardService
+          .forwardToLegacyLaravel(data)
+          .catch((error: any) => {
+            this.logger.error(
+              `Legacy Pancake relay failed event_type=${data.event_type}: ${error?.message}`,
+            );
+          });
+        return;
       }
 
       if (data.object === 'page') {
