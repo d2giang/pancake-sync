@@ -232,6 +232,31 @@ describe('PancakeWebhookController', () => {
     expect(realtimeService.emitConversationUpdated).not.toHaveBeenCalled();
   });
 
+  it('emits the message contract with Pancake IDs after both Laravel saves succeed', async () => {
+    forwardService.forwardToLaravel.mockResolvedValue(true);
+    const req: any = { body: makeMessagingBody() };
+    const res = makeResponse();
+    const bgSpy = jest.spyOn(controller as any, 'processMessagingWebhook');
+
+    await controller.handlePost(req, res as any);
+    await bgSpy.mock.results[0].value;
+
+    expect(forwardService.forwardToLaravel).toHaveBeenCalledTimes(2);
+    expect(realtimeService.emitMessageCreated).toHaveBeenCalledWith({
+      page_id: 'page-1',
+      conversation_id: 'conv-1',
+      message_id: 'msg-1',
+      timestamp: expect.any(String),
+      source: 'pancake',
+    });
+    expect(realtimeService.emitConversationUpdated).toHaveBeenCalledWith({
+      page_id: 'page-1',
+      conversation_id: 'conv-1',
+      timestamp: expect.any(String),
+      source: 'pancake',
+    });
+  });
+
   it('sends a stable idempotency key for the message forward call', async () => {
     forwardService.forwardToLaravel.mockResolvedValue(true);
 

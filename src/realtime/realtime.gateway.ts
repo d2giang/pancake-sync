@@ -79,51 +79,64 @@ export class RealtimeGateway
   async handleJoinPage(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { page_id: string },
-  ): Promise<{ event: string; room: string } | { event: string; reason: string }> {
+  ): Promise<{ event: string; data: unknown }> {
     const token = client.handshake.auth?.token as string;
-    if (!await this.verifyToken(token)) {
+    if (!(await this.verifyToken(token))) {
       client.disconnect(true);
-      return { event: 'error', reason: 'unauthorized' };
+      return { event: 'error', data: { reason: 'unauthorized' } };
     }
-    const room = `page:${data?.page_id}`;
+    const pageId = String(data?.page_id || '').trim();
+    if (!pageId)
+      return { event: 'error', data: { reason: 'page_id_required' } };
+    const room = `page:${pageId}`;
     client.join(room);
-    this.logger.log(`Socket room joined: ${room} (id=${client.id})`);
-    return { event: 'joined', room };
+    const sockets = this.server.sockets.adapter.rooms.get(room)?.size || 0;
+    this.logger.log(
+      `Socket room joined: ${room} sockets=${sockets} (id=${client.id})`,
+    );
+    return { event: 'joined', data: { room, sockets } };
   }
 
   @SubscribeMessage('leave_page')
   handleLeavePage(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { page_id: string },
-  ): { event: string; room: string } {
+  ): { event: string; data: { room: string } } {
     const room = `page:${data?.page_id}`;
     client.leave(room);
-    return { event: 'left', room };
+    return { event: 'left', data: { room } };
   }
 
   @SubscribeMessage('join_conversation')
   async handleJoinConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversation_id: string },
-  ): Promise<{ event: string; room: string } | { event: string; reason: string }> {
+  ): Promise<{ event: string; data: unknown }> {
     const token = client.handshake.auth?.token as string;
-    if (!await this.verifyToken(token)) {
+    if (!(await this.verifyToken(token))) {
       client.disconnect(true);
-      return { event: 'error', reason: 'unauthorized' };
+      return { event: 'error', data: { reason: 'unauthorized' } };
     }
-    const room = `conversation:${data?.conversation_id}`;
+    const conversationId = String(data?.conversation_id || '').trim();
+    if (!conversationId) {
+      return { event: 'error', data: { reason: 'conversation_id_required' } };
+    }
+    const room = `conversation:${conversationId}`;
     client.join(room);
-    this.logger.log(`Socket room joined: ${room} (id=${client.id})`);
-    return { event: 'joined', room };
+    const sockets = this.server.sockets.adapter.rooms.get(room)?.size || 0;
+    this.logger.log(
+      `Socket room joined: ${room} sockets=${sockets} (id=${client.id})`,
+    );
+    return { event: 'joined', data: { room, sockets } };
   }
 
   @SubscribeMessage('leave_conversation')
   handleLeaveConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversation_id: string },
-  ): { event: string; room: string } {
+  ): { event: string; data: { room: string } } {
     const room = `conversation:${data?.conversation_id}`;
     client.leave(room);
-    return { event: 'left', room };
+    return { event: 'left', data: { room } };
   }
 }

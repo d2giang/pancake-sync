@@ -45,6 +45,29 @@ export class WebhookController {
         return res.status(400).type('text/plain').send('Bad Request');
       }
 
+      // Native Pancake messaging belongs to /api/pancake/webhook. Keeping
+      // this explicit prevents a silently successful 200 on the legacy URL
+      // while no Laravel message save or Socket.IO emit takes place.
+      if (data.event_type === 'messaging') {
+        this.service.logLine(
+          'Pancake messaging sent to legacy /api/webhook; configure /api/pancake/webhook',
+          {
+            page_id: data.page_id || null,
+            conversation_id:
+              data.data?.conversation?.conversation_id ||
+              data.data?.conversation?.id ||
+              null,
+            message_id:
+              data.data?.message?.message_id || data.data?.message?.id || null,
+          },
+          'ERROR',
+        );
+        return res.status(422).json({
+          success: false,
+          message: 'Use /api/pancake/webhook for Pancake messaging events',
+        });
+      }
+
       this.service.cleanOldPendingRefs().catch(() => undefined);
 
       this.service.logLine('Webhook POST received', {
