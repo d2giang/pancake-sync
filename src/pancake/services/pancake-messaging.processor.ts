@@ -44,7 +44,7 @@ export async function processPancakeMessagingWebhook(
   const { forwardService, cache, realtimeService, logger } = deps;
 
   try {
-    const summary = mapConversationToSummary(conversation);
+    const summary = mapConversationToSummary(conversation, pageId);
     const normalizedMessage = mapMessageToNormalized(message, pageId);
 
     try {

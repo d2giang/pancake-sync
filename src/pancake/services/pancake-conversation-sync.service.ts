@@ -163,7 +163,7 @@ export class PancakeConversationSyncService {
           }
 
           // Normalize
-          const summary = mapConversationToSummary(conv);
+          const summary = mapConversationToSummary(conv, pageId);
 
           // Cache locally (respect store flag)
           if (isStoreConversationCache()) {
@@ -298,7 +298,7 @@ export class PancakeConversationSyncService {
         return { success: false };
       }
 
-      const summary = mapConversationToSummary(conv);
+      const summary = mapConversationToSummary(conv, pageId);
 
       // Cache locally (respect store flag)
       if (isStoreConversationCache()) {

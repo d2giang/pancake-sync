@@ -11,6 +11,7 @@ import {
  */
 export function mapConversationToSummary(
   conversation: PancakeConversation,
+  knownPageId?: string,
 ): ConversationSummary {
   const raw = conversation || {};
 
@@ -18,7 +19,11 @@ export function mapConversationToSummary(
   const firstCustomer = Array.isArray(raw.customers) && raw.customers.length > 0
     ? raw.customers[0]
     : null;
-  const pageId = String(raw.page_id || '');
+  // Prefer the page ID already known from the request context (matched
+  // against PANCAKE_PAGES) over the raw conversation's own `page_id` field —
+  // some platforms (tiktok/zalo/threads/instagram) don't reliably echo it
+  // back in the nested conversation object.
+  const pageId = String(knownPageId || raw.page_id || '');
   const conversationId = String(raw.conversation_id || raw.id || '');
   // Real API shape (confirmed): no `customer_name`/`facebook_id` fields —
   // customer identity lives in `from` (the message sender) and `customers[]`.
