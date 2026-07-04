@@ -10,6 +10,7 @@ describe('PancakeApiService — Page Access Token auth', () => {
   beforeEach(() => {
     process.env.PANCAKE_PAGE_ID = 'page-1';
     process.env.PANCAKE_PAGE_ACCESS_TOKEN = 'test-page-token';
+    delete process.env.PANCAKE_PAGES;
     delete process.env.PANCAKE_PAGE_TOKENS;
 
     postMock = jest.fn().mockResolvedValue({ data: { success: true } });
@@ -42,7 +43,7 @@ describe('PancakeApiService — Page Access Token auth', () => {
   });
 });
 
-describe('PancakeApiService — multi-platform PANCAKE_PAGE_TOKENS', () => {
+describe('PancakeApiService — multi-platform PANCAKE_PAGES', () => {
   const mockedAxios = axios as jest.Mocked<typeof axios>;
 
   const pageTokens: Record<string, string> = {
@@ -54,7 +55,14 @@ describe('PancakeApiService — multi-platform PANCAKE_PAGE_TOKENS', () => {
   };
 
   beforeEach(() => {
-    process.env.PANCAKE_PAGE_TOKENS = JSON.stringify(pageTokens);
+    process.env.PANCAKE_PAGES = JSON.stringify(
+      Object.entries(pageTokens).map(([id, token], index) => ({
+        id,
+        platform: ['facebook', 'threads', 'tiktok', 'zalo', 'instagram'][index],
+        token,
+      })),
+    );
+    delete process.env.PANCAKE_PAGE_TOKENS;
     delete process.env.PANCAKE_PAGE_ID;
     delete process.env.PANCAKE_PAGE_ACCESS_TOKEN;
 
@@ -65,6 +73,7 @@ describe('PancakeApiService — multi-platform PANCAKE_PAGE_TOKENS', () => {
   });
 
   afterEach(() => {
+    delete process.env.PANCAKE_PAGES;
     delete process.env.PANCAKE_PAGE_TOKENS;
     jest.restoreAllMocks();
   });
@@ -80,12 +89,24 @@ describe('PancakeApiService — multi-platform PANCAKE_PAGE_TOKENS', () => {
     }
   });
 
-  it('warns and sends no token for a page not present in PANCAKE_PAGE_TOKENS', async () => {
+  it('warns and sends no token for a page not present in PANCAKE_PAGES', async () => {
     const service = new PancakeApiService();
 
     await service.markRead('unknown-page-id', 'conv-1');
 
     const lastCall = (mockedAxios.create as jest.Mock).mock.calls.at(-1)[0];
     expect(lastCall.params).toEqual({});
+  });
+
+  it('prefers PANCAKE_PAGES over the legacy PANCAKE_PAGE_TOKENS config', async () => {
+    process.env.PANCAKE_PAGE_TOKENS = JSON.stringify({
+      '331141913426390': 'legacy-token',
+    });
+    const service = new PancakeApiService();
+
+    await service.markRead('331141913426390', 'conv-1');
+
+    const lastCall = (mockedAxios.create as jest.Mock).mock.calls.at(-1)[0];
+    expect(lastCall.params).toEqual({ page_access_token: 'token-facebook' });
   });
 });

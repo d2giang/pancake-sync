@@ -6,12 +6,68 @@ const logger = new Logger('EnvValidator');
 /**
  * Parse page tokens from env.
  * Priority:
- *   1. PANCAKE_PAGE_TOKENS (JSON multi-page)
- *   2. PANCAKE_PAGE_ID + PANCAKE_PAGE_ACCESS_TOKEN (single page fallback)
+ *   1. PANCAKE_PAGES (JSON array of { id, platform, token })
+ *   2. PANCAKE_PAGE_TOKENS (legacy JSON object { pageId: token })
+ *   3. PANCAKE_PAGE_ID + PANCAKE_PAGE_ACCESS_TOKEN (single page fallback)
  * Returns empty object if none configured.
  */
 export function parsePageTokens(): PageTokenConfig {
-  // 1. Try multi-page JSON first
+  // 1. Preferred multi-platform config. Platform is metadata; Pancake API
+  // authentication is still selected by the page ID in each request.
+  const rawPages = (process.env.PANCAKE_PAGES || '').trim();
+
+  if (rawPages) {
+    try {
+      const parsed: unknown = JSON.parse(rawPages);
+
+      if (Array.isArray(parsed)) {
+        const config: PageTokenConfig = {};
+
+        for (const [index, page] of parsed.entries()) {
+          if (typeof page !== 'object' || page === null || Array.isArray(page)) {
+            logger.warn(`PANCAKE_PAGES[${index}] is invalid, skipping.`);
+            continue;
+          }
+
+          const { id, platform, token } = page as Record<string, unknown>;
+          const pageId = typeof id === 'string' ? id.trim() : '';
+          const pageToken = typeof token === 'string' ? token.trim() : '';
+
+          if (!pageId || !pageToken) {
+            logger.warn(
+              `PANCAKE_PAGES[${index}] must contain non-empty id and token, skipping.`,
+            );
+            continue;
+          }
+
+          if (typeof platform !== 'string' || !platform.trim()) {
+            logger.warn(
+              `PANCAKE_PAGES[${index}] has no valid platform, skipping.`,
+            );
+            continue;
+          }
+
+          if (config[pageId]) {
+            logger.warn(`Duplicate Pancake page ID ${pageId}, using the last token.`);
+          }
+
+          config[pageId] = pageToken;
+        }
+
+        if (Object.keys(config).length > 0) {
+          return config;
+        }
+      } else {
+        logger.error(
+          'PANCAKE_PAGES must be a JSON array of { id, platform, token }.',
+        );
+      }
+    } catch {
+      logger.error('PANCAKE_PAGES is not valid JSON.');
+    }
+  }
+
+  // 2. Try the legacy multi-page JSON object
   const rawMulti = (process.env.PANCAKE_PAGE_TOKENS || '').trim();
 
   if (rawMulti) {
@@ -42,7 +98,7 @@ export function parsePageTokens(): PageTokenConfig {
     }
   }
 
-  // 2. Fallback to single page config
+  // 3. Fallback to single page config
   const singlePageId = (process.env.PANCAKE_PAGE_ID || '').trim();
   const singleToken = (process.env.PANCAKE_PAGE_ACCESS_TOKEN || '').trim();
 

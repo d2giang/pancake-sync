@@ -23,7 +23,8 @@ export class PancakeApiService {
 
   /**
    * Create an Axios instance with the appropriate auth for a given page.
-   * Uses PANCAKE_PAGE_TOKENS or PANCAKE_PAGE_ID/PANCAKE_PAGE_ACCESS_TOKEN env config.
+   * Uses PANCAKE_PAGES, legacy PANCAKE_PAGE_TOKENS, or the single-page
+   * PANCAKE_PAGE_ID/PANCAKE_PAGE_ACCESS_TOKEN env config.
    *
    * Per Pancake's API docs, every page-level endpoint under
    * /public_api/v1|v2/pages/{page_id}/... is authenticated with the Page
