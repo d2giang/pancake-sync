@@ -5,6 +5,7 @@ import { PancakeWebhookForwardService } from '../pancake/services/pancake-webhoo
 import { LocalCacheService } from '../pancake/services/local-cache.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { processPancakeMessagingWebhook } from '../pancake/services/pancake-messaging.processor';
+import { MessagingStatsService } from '../pancake/services/messaging-stats.service';
 import { isMessagingWebhookEnabled } from '../pancake/utils/env-validator';
 
 @Controller('api/webhook')
@@ -16,6 +17,7 @@ export class WebhookController {
     private readonly forwardService: PancakeWebhookForwardService,
     private readonly cache: LocalCacheService,
     private readonly realtimeService: RealtimeService,
+    private readonly stats: MessagingStatsService,
   ) {}
 
   @Get()
@@ -100,6 +102,7 @@ export class WebhookController {
             forwardService: this.forwardService,
             cache: this.cache,
             realtimeService: this.realtimeService,
+            stats: this.stats,
             logger: this.logger,
           },
         );

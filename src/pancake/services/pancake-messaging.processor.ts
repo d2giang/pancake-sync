@@ -17,6 +17,7 @@ import {
 } from '../utils/env-validator';
 import { LocalCacheService } from './local-cache.service';
 import { PancakeWebhookForwardService } from './pancake-webhook-forward.service';
+import { MessagingStatsService } from './messaging-stats.service';
 
 export interface MessagingWebhookJob {
   pageId: string;
@@ -31,6 +32,7 @@ export interface MessagingProcessorDependencies {
   forwardService: PancakeWebhookForwardService;
   cache: LocalCacheService;
   realtimeService: RealtimeService;
+  stats: MessagingStatsService;
   logger: Logger;
 }
 
@@ -41,7 +43,7 @@ export async function processPancakeMessagingWebhook(
 ): Promise<void> {
   const startedAt = Date.now();
   const { pageId, conversationId, conversation, message, receivedAt } = job;
-  const { forwardService, cache, realtimeService, logger } = deps;
+  const { forwardService, cache, realtimeService, stats, logger } = deps;
 
   let convOk: boolean | null = null;
   let msgOk: boolean | null = null;
@@ -122,16 +124,24 @@ export async function processPancakeMessagingWebhook(
       error?.stack,
     );
   } finally {
+    const totalMs = Date.now() - startedAt;
     const forwardSummary = isForwardMessagingEvents()
       ? `conv=${convDurationMs}ms(${convOk}) msg=${msgDurationMs}ms(${msgOk})`
       : 'off';
 
-    // One line per message is enough for normal operation. Per-step detail
-    // (socket rooms, individual forward calls) lives at debug level in the
-    // services that emit it — flip LOG_LEVEL=debug to see it.
-    logger.log(
+    // Per-message detail is debug-only — a single busy conversation can send
+    // dozens of messages a minute, so logging one line per message still
+    // floods the console. MessagingStatsService rolls these up into one
+    // periodic summary line instead (see messaging-stats.service.ts).
+    logger.debug(
       `Pancake message processed conversation_id=${conversationId} page_id=${pageId} ` +
-        `forward=${forwardSummary} total=${Date.now() - startedAt}ms received_at=${receivedAt}`,
+        `forward=${forwardSummary} total=${totalMs}ms received_at=${receivedAt}`,
     );
+
+    stats.record({
+      conversationId,
+      ok: isForwardMessagingEvents() ? !!(convOk && msgOk) : true,
+      durationMs: totalMs,
+    });
   }
 }

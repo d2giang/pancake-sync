@@ -14,6 +14,7 @@ import { PancakeWebhookForwardService } from './services/pancake-webhook-forward
 import { PancakeConversationActionService } from './services/pancake-conversation-action.service';
 import { PancakeConversationSyncService } from './services/pancake-conversation-sync.service';
 import { NoResponseDetectorService } from './services/no-response-detector.service';
+import { MessagingStatsService } from './services/messaging-stats.service';
 
 // Schedulers
 import { ConversationSyncScheduler } from './schedulers/conversation-sync.scheduler';
@@ -31,6 +32,7 @@ import { NoResponseScheduler } from './schedulers/no-response.scheduler';
     NoResponseDetectorService,
     ConversationSyncScheduler,
     NoResponseScheduler,
+    MessagingStatsService,
   ],
   exports: [
     PancakeApiService,
@@ -38,6 +40,7 @@ import { NoResponseScheduler } from './schedulers/no-response.scheduler';
     PancakeConversationActionService,
     PancakeConversationSyncService,
     LocalCacheService,
+    MessagingStatsService,
   ],
 })
 export class PancakeModule implements OnModuleInit {
