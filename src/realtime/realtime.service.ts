@@ -109,8 +109,11 @@ export class RealtimeService {
       return { room, sockets };
     });
 
+    // Debug-only — the caller (messaging processor) already logs one summary
+    // line per message; this duplicates it and is nearly always sockets=0
+    // since most delivery happens via the Laravel forward, not this socket.
     const totalSockets = roomResults.reduce((sum, r) => sum + r.sockets, 0);
-    this.logger.log(
+    this.logger.debug(
       `Realtime ${eventName} conversation_id=${payload.conversation_id || '(none)'} ` +
         `rooms=${roomResults.length} sockets=${totalSockets}`,
     );

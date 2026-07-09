@@ -73,7 +73,10 @@ export class WebhookController {
         const messageId = String(message?.message_id || message?.id || '');
         const receivedAt = new Date().toISOString();
 
-        this.logger.log(
+        // Debug-only — the processor's "Pancake message processed" summary
+        // (logged once processing finishes) is the one line per message
+        // worth keeping at info level; this one just duplicates it earlier.
+        this.logger.debug(
           `Pancake messaging received page_id=${pageId || '(none)'} ` +
             `conversation_id=${conversationId || '(none)'} message_id=${messageId || '(none)'}`,
         );
