@@ -43,6 +43,11 @@ export async function processPancakeMessagingWebhook(
   const { pageId, conversationId, conversation, message, receivedAt } = job;
   const { forwardService, cache, realtimeService, logger } = deps;
 
+  let convOk: boolean | null = null;
+  let msgOk: boolean | null = null;
+  let convDurationMs = 0;
+  let msgDurationMs = 0;
+
   try {
     const summary = mapConversationToSummary(conversation, pageId);
     const normalizedMessage = mapMessageToNormalized(message, pageId);
@@ -66,7 +71,7 @@ export async function processPancakeMessagingWebhook(
     if (isForwardMessagingEvents()) {
       const occurredAt = new Date().toISOString();
       const convStartedAt = Date.now();
-      const convOk = await forwardService.forwardToLaravel({
+      convOk = await forwardService.forwardToLaravel({
         event_version: '1.0',
         event: 'pancake_messaging',
         action: 'conversation_message_received',
@@ -75,10 +80,10 @@ export async function processPancakeMessagingWebhook(
         conversation_id: conversationId,
         ...buildLaravelConversationFields(summary),
       });
-      const convDurationMs = Date.now() - convStartedAt;
+      convDurationMs = Date.now() - convStartedAt;
 
       const msgStartedAt = Date.now();
-      const msgOk = await forwardService.forwardToLaravel({
+      msgOk = await forwardService.forwardToLaravel({
         event_version: '1.0',
         event: 'message_received',
         action: 'conversation_message_received',
@@ -87,15 +92,9 @@ export async function processPancakeMessagingWebhook(
         conversation_id: conversationId,
         ...buildLaravelMessageFields(pageId, conversationId, normalizedMessage),
       });
-      const msgDurationMs = Date.now() - msgStartedAt;
-
-      logger.log(
-        `Laravel forward timing conversation_id=${conversationId}: ` +
-          `conversation_save=${convDurationMs}ms(ok=${convOk}) message_save=${msgDurationMs}ms(ok=${msgOk})`,
-      );
+      msgDurationMs = Date.now() - msgStartedAt;
 
       if (convOk && msgOk) {
-        const emitStartedAt = Date.now();
         const messageId = String(normalizedMessage?.message_id || '');
         realtimeService.emitMessageCreated({
           page_id: pageId,
@@ -110,10 +109,6 @@ export async function processPancakeMessagingWebhook(
           timestamp: occurredAt,
           source: 'pancake',
         });
-        logger.log(
-          `Realtime emitted conversation_id=${conversationId} at=${new Date().toISOString()} ` +
-            `emit_call_took=${Date.now() - emitStartedAt}ms`,
-        );
       } else {
         logger.warn(
           `Laravel forward incomplete for conversation_id=${conversationId}: ` +
@@ -123,13 +118,20 @@ export async function processPancakeMessagingWebhook(
     }
   } catch (error: any) {
     logger.error(
-      `Background messaging webhook processing failed for conversation_id=${conversationId}: ${error?.message}`,
+      `Messaging webhook processing failed for conversation_id=${conversationId}: ${error?.message}`,
       error?.stack,
     );
   } finally {
+    const forwardSummary = isForwardMessagingEvents()
+      ? `conv=${convDurationMs}ms(${convOk}) msg=${msgDurationMs}ms(${msgOk})`
+      : 'off';
+
+    // One line per message is enough for normal operation. Per-step detail
+    // (socket rooms, individual forward calls) lives at debug level in the
+    // services that emit it — flip LOG_LEVEL=debug to see it.
     logger.log(
-      `Background messaging webhook processing finished in ${Date.now() - startedAt}ms ` +
-        `conversation_id=${conversationId} received_at=${receivedAt}`,
+      `Pancake message processed conversation_id=${conversationId} page_id=${pageId} ` +
+        `forward=${forwardSummary} total=${Date.now() - startedAt}ms received_at=${receivedAt}`,
     );
   }
 }

@@ -103,13 +103,17 @@ export class RealtimeService {
     const roomResults = rooms.map((room) => {
       const sockets = server.sockets.adapter.rooms.get(room)?.size || 0;
       server.to(room).emit(eventName, payload);
-      this.logger.log(
-        `Socket emitted event=${eventName} room=${room} sockets=${sockets} ` +
-          `page_id=${payload.page_id} conversation_id=${payload.conversation_id} ` +
-          `message_id=${payload.message_id || '(none)'}`,
-      );
+      // Per-room detail is debug-only noise — the one-line summary below is
+      // enough for normal operation; flip LOG_LEVEL=debug to see this.
+      this.logger.debug(`emit=${eventName} room=${room} sockets=${sockets}`);
       return { room, sockets };
     });
+
+    const totalSockets = roomResults.reduce((sum, r) => sum + r.sockets, 0);
+    this.logger.log(
+      `Realtime ${eventName} conversation_id=${payload.conversation_id || '(none)'} ` +
+        `rooms=${roomResults.length} sockets=${totalSockets}`,
+    );
 
     return { event: eventName, rooms: roomResults };
   }

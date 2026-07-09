@@ -4,7 +4,18 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import * as bodyParser from 'body-parser';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  // Default to quiet console output (log/warn/error only) — the messaging
+  // and realtime pipelines run on every inbound message, so leaving
+  // debug/verbose on by default drowns the console in per-step noise.
+  // Set LOG_LEVEL=debug to see the detailed step-by-step timings again.
+  const isVerbose = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
+
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: false,
+    logger: isVerbose
+      ? ['log', 'warn', 'error', 'debug', 'verbose']
+      : ['log', 'warn', 'error'],
+  });
   const port = Number(process.env.PORT || 3000);
   const host = '0.0.0.0';
 

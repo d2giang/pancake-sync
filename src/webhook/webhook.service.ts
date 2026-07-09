@@ -552,6 +552,12 @@ export class WebhookService {
         ref,
       });
 
+      // File log alone doesn't show up in the console/Render log stream —
+      // this is the one business event worth surfacing there too.
+      this.logger.log(
+        `Ref captured conversation_id=${conversationId} event_type=${eventType} ref=${ref}`,
+      );
+
       await this.handleRefCapture(pageId, userId, ref);
     }
 
@@ -828,6 +834,10 @@ export class WebhookService {
         record_id: recordId,
         ref,
       }, 'DEBUG');
+
+      this.logger.log(
+        `Ref synced to Pancake CRM conversation_id=${conversationId} record_id=${recordId} ref=${ref}`,
+      );
     }
 
     return ok;
