@@ -171,6 +171,54 @@ export function getLaravelWebhookSecret(): string {
   return (process.env.LARAVEL_WEBHOOK_SECRET || '').trim();
 }
 
+export interface LaravelTargetConfig {
+  name: string;
+  apiBaseUrl: string;
+  webhookUrl: string;
+  legacyWebhookUrl: string;
+  webhookSecret: string;
+}
+
+/**
+ * Laravel destinations receiving the same Pancake page events. VCC and
+ * Mintoku share one Pancake page/webhook, so delivery must fan out instead of
+ * choosing a destination by page_id. The original LARAVEL_* variables remain
+ * a backwards-compatible fallback for single-CRM deployments.
+ */
+export function getLaravelTargets(): LaravelTargetConfig[] {
+  const prefixes = ['VCC', 'MINTOKU'];
+  const targets = prefixes
+    .map((prefix) => ({
+      name: prefix.toLowerCase(),
+      apiBaseUrl: (process.env[`${prefix}_LARAVEL_API_BASE_URL`] || '')
+        .trim()
+        .replace(/\/$/, ''),
+      webhookUrl: (process.env[`${prefix}_LARAVEL_WEBHOOK_URL`] || '').trim(),
+      legacyWebhookUrl: (
+        process.env[`${prefix}_LARAVEL_LEGACY_WEBHOOK_URL`] || ''
+      ).trim(),
+      webhookSecret: (
+        process.env[`${prefix}_LARAVEL_WEBHOOK_SECRET`] || ''
+      ).trim(),
+    }))
+    .filter(
+      (target) =>
+        target.apiBaseUrl || target.webhookUrl || target.legacyWebhookUrl,
+    );
+
+  if (targets.length > 0) return targets;
+
+  return [
+    {
+      name: 'default',
+      apiBaseUrl: getLaravelApiBaseUrl(),
+      webhookUrl: getLaravelWebhookUrl(),
+      legacyWebhookUrl: getLaravelLegacyWebhookUrl(),
+      webhookSecret: getLaravelWebhookSecret(),
+    },
+  ];
+}
+
 export function getLaravelWebhookTimeout(): number {
   return Number(process.env.LARAVEL_WEBHOOK_TIMEOUT || 15000);
 }

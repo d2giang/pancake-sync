@@ -1,12 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import {
-  getLaravelWebhookUrl,
-  getLaravelLegacyWebhookUrl,
   getLaravelWebhookSecret,
   getLaravelWebhookTimeout,
   getLaravelWebhookRetryCount,
   getLaravelWebhookRetryDelay,
+  getLaravelTargets,
+  type LaravelTargetConfig,
 } from '../utils/env-validator';
 
 @Injectable()
@@ -18,7 +18,8 @@ export class PancakeWebhookForwardService {
    * Retries on network errors only (not on 4xx/5xx responses).
    */
   async forwardToLaravel(payload: Record<string, any>): Promise<boolean> {
-    return this.postToLaravel(getLaravelWebhookUrl(), payload, 'LARAVEL_WEBHOOK_URL');
+    const targets = getLaravelTargets().filter((target) => target.webhookUrl);
+    return this.postToTargets(targets, 'webhookUrl', payload, 'LARAVEL_WEBHOOK_URL');
   }
 
   /**
@@ -27,24 +28,56 @@ export class PancakeWebhookForwardService {
    * specifically normalize, so existing Laravel-side handling keeps working.
    */
   async forwardToLegacyLaravel(payload: Record<string, any>): Promise<boolean> {
-    return this.postToLaravel(
-      getLaravelLegacyWebhookUrl(),
+    const targets = getLaravelTargets().filter(
+      (target) => target.legacyWebhookUrl,
+    );
+    return this.postToTargets(
+      targets,
+      'legacyWebhookUrl',
       payload,
       'LARAVEL_LEGACY_WEBHOOK_URL',
     );
+  }
+
+  private async postToTargets(
+    targets: LaravelTargetConfig[],
+    urlKey: 'webhookUrl' | 'legacyWebhookUrl',
+    payload: Record<string, any>,
+    envVarName: string,
+  ): Promise<boolean> {
+    if (targets.length === 0) {
+      this.logger.debug(`${envVarName} not set, skipping forward`);
+      return false;
+    }
+
+    const results = await Promise.all(
+      targets.map((target) =>
+        this.postToLaravel(
+          target[urlKey],
+          payload,
+          `${target.name}:${envVarName}`,
+          target.webhookSecret,
+        ),
+      ),
+    );
+
+    // One CRM being temporarily unavailable must not suppress realtime for a
+    // CRM that persisted the event successfully.
+    return results.some(Boolean);
   }
 
   private async postToLaravel(
     url: string,
     payload: Record<string, any>,
     envVarName: string,
+    webhookSecret?: string,
   ): Promise<boolean> {
     if (!url) {
       this.logger.debug(`${envVarName} not set, skipping forward`);
       return false;
     }
 
-    const secret = getLaravelWebhookSecret();
+    const secret = webhookSecret ?? getLaravelWebhookSecret();
     const timeout = getLaravelWebhookTimeout();
     const maxRetries = getLaravelWebhookRetryCount();
     const retryDelayMs = getLaravelWebhookRetryDelay();

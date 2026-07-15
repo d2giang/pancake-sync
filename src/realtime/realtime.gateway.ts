@@ -11,7 +11,7 @@ import {
 import type { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import axios from 'axios';
-import { getLaravelApiBaseUrl } from '../pancake/utils/env-validator';
+import { getLaravelTargets } from '../pancake/utils/env-validator';
 import { RealtimeService } from './realtime.service';
 
 @WebSocketGateway({
@@ -58,17 +58,24 @@ export class RealtimeGateway
    * Returns true if valid, false on 401/403/network error.
    */
   private async verifyToken(token: string): Promise<boolean> {
-    const base = getLaravelApiBaseUrl();
-    if (!base) return true; // Dev fallback — no Laravel URL configured.
-    try {
-      await axios.get(`${base}/me`, {
-        headers: { Authorization: token },
-        timeout: 5000,
-      });
-      return true;
-    } catch {
-      return false;
-    }
+    const apiBases = [
+      ...new Set(
+        getLaravelTargets()
+          .map((target) => target.apiBaseUrl)
+          .filter(Boolean),
+      ),
+    ];
+    if (apiBases.length === 0) return true; // Dev fallback.
+
+    const results = await Promise.allSettled(
+      apiBases.map((base) =>
+        axios.get(`${base}/me`, {
+          headers: { Authorization: token },
+          timeout: 5000,
+        }),
+      ),
+    );
+    return results.some((result) => result.status === 'fulfilled');
   }
 
   handleDisconnect(client: Socket): void {
