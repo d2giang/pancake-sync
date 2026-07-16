@@ -56,11 +56,13 @@ describe('WebhookController legacy Pancake messaging compatibility', () => {
       emitMessageCreated: jest.fn(),
       emitConversationUpdated: jest.fn(),
     };
+    const stats: any = { record: jest.fn() };
     const controller = new WebhookController(
       service,
       forwardService,
       cache,
       realtimeService,
+      stats,
     );
     const res = response();
 
@@ -93,11 +95,13 @@ describe('WebhookController legacy Pancake messaging compatibility', () => {
       emitMessageCreated: jest.fn(),
       emitConversationUpdated: jest.fn(),
     };
+    const stats: any = { record: jest.fn() };
     const controller = new WebhookController(
       service,
       forwardService,
       { upsertConversation: jest.fn(), appendMessage: jest.fn() } as any,
       realtimeService,
+      stats,
     );
 
     await controller.handlePost(

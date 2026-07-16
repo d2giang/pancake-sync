@@ -4,9 +4,9 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  getLaravelApiBaseUrl,
-  getLaravelWebhookSecret,
+  getLaravelTargets,
   isPancakeCrmSyncEnabled,
+  type LaravelTargetConfig,
 } from '../pancake/utils/env-validator';
 
 type LogLevel = 'IMPORTANT' | 'ERROR' | 'DEBUG';
@@ -25,13 +25,17 @@ export class WebhookService {
     return path.join(this.baseDataPath, 'messenger_webhook.log');
   }
 
-  private pendingRefsApiBase() {
-    return `${getLaravelApiBaseUrl()}/internal/pancake/pending-refs`;
+  private pendingRefTargets(): LaravelTargetConfig[] {
+    return getLaravelTargets().filter((target) => target.apiBaseUrl);
   }
 
-  private pendingRefsApiHeaders() {
+  private pendingRefsApiBase(target: LaravelTargetConfig) {
+    return `${target.apiBaseUrl}/internal/pancake/pending-refs`;
+  }
+
+  private pendingRefsApiHeaders(target: LaravelTargetConfig) {
     return {
-      'X-Webhook-Secret': getLaravelWebhookSecret(),
+      'X-Webhook-Secret': target.webhookSecret,
       Accept: 'application/json',
     };
   }
@@ -177,20 +181,36 @@ export class WebhookService {
    * referral captures.
    */
   async loadPendingRefs(): Promise<Record<string, any>> {
-    try {
-      const res = await axios.get(this.pendingRefsApiBase(), {
-        headers: this.pendingRefsApiHeaders(),
-        timeout: 10000,
-      });
+    const merged: Record<string, any> = {};
 
-      return res.data?.data || {};
-    } catch (error: any) {
+    await Promise.all(
+      this.pendingRefTargets().map(async (target) => {
+        try {
+          const res = await axios.get(this.pendingRefsApiBase(target), {
+            headers: this.pendingRefsApiHeaders(target),
+            timeout: 10000,
+          });
+          Object.assign(merged, res.data?.data || {});
+        } catch (error: any) {
+          this.logLine(
+            'Failed to load pending refs from Laravel',
+            { target: target.name, message: error.message },
+            'ERROR',
+          );
+        }
+      }),
+    );
+
+    return merged;
+  }
+
+  private warnIfNoPendingRefTargets() {
+    if (this.pendingRefTargets().length === 0) {
       this.logLine(
-        'Failed to load pending refs from Laravel',
-        { message: error.message },
+        'No Laravel API base URL configured for pending refs',
+        {},
         'ERROR',
       );
-      return {};
     }
   }
 
@@ -208,9 +228,7 @@ export class WebhookService {
 
     for (const conversationId of Object.keys(all)) {
       const row = all[conversationId];
-      const time = row?.captured_at
-        ? new Date(row.captured_at).getTime()
-        : 0;
+      const time = row?.captured_at ? new Date(row.captured_at).getTime() : 0;
 
       if (!row || !row.captured_at || !time || time < threshold) {
         await this.removePendingRef(conversationId);
@@ -219,60 +237,96 @@ export class WebhookService {
   }
 
   async setPendingRef(conversationId: string, payload: any) {
-    try {
-      await axios.post(
-        this.pendingRefsApiBase(),
-        {
-          conversation_id: conversationId,
-          ref: payload.ref,
-          page_id: payload.page_id,
-          sender_id: payload.sender_id,
-          captured_at: payload.captured_at || new Date().toISOString(),
-        },
-        { headers: this.pendingRefsApiHeaders(), timeout: 10000 },
-      );
-    } catch (error: any) {
-      this.logLine(
-        'Failed to save pending ref to Laravel',
-        { conversation_id: conversationId, message: error.message },
-        'ERROR',
-      );
-    }
+    this.warnIfNoPendingRefTargets();
+    await Promise.all(
+      this.pendingRefTargets().map(async (target) => {
+        try {
+          await axios.post(
+            this.pendingRefsApiBase(target),
+            {
+              conversation_id: conversationId,
+              ref: payload.ref,
+              page_id: payload.page_id,
+              sender_id: payload.sender_id,
+              captured_at: payload.captured_at || new Date().toISOString(),
+            },
+            {
+              headers: this.pendingRefsApiHeaders(target),
+              timeout: 10000,
+            },
+          );
+        } catch (error: any) {
+          this.logLine(
+            'Failed to save pending ref to Laravel',
+            {
+              target: target.name,
+              conversation_id: conversationId,
+              message: error.message,
+            },
+            'ERROR',
+          );
+        }
+      }),
+    );
   }
 
   async getPendingRef(conversationId: string): Promise<any | null> {
-    try {
-      const res = await axios.get(
-        `${this.pendingRefsApiBase()}/${encodeURIComponent(conversationId)}`,
-        { headers: this.pendingRefsApiHeaders(), timeout: 10000 },
-      );
+    this.warnIfNoPendingRefTargets();
+    const results = await Promise.all(
+      this.pendingRefTargets().map(async (target) => {
+        try {
+          const res = await axios.get(
+            `${this.pendingRefsApiBase(target)}/${encodeURIComponent(conversationId)}`,
+            {
+              headers: this.pendingRefsApiHeaders(target),
+              timeout: 10000,
+            },
+          );
+          return res.data?.data || null;
+        } catch (error: any) {
+          if (error.response?.status !== 404) {
+            this.logLine(
+              'Failed to get pending ref from Laravel',
+              {
+                target: target.name,
+                conversation_id: conversationId,
+                message: error.message,
+              },
+              'ERROR',
+            );
+          }
+          return null;
+        }
+      }),
+    );
 
-      return res.data?.data || null;
-    } catch (error: any) {
-      if (error.response?.status !== 404) {
-        this.logLine(
-          'Failed to get pending ref from Laravel',
-          { conversation_id: conversationId, message: error.message },
-          'ERROR',
-        );
-      }
-      return null;
-    }
+    return results.find((row) => row?.ref) || null;
   }
 
   async removePendingRef(conversationId: string) {
-    try {
-      await axios.delete(
-        `${this.pendingRefsApiBase()}/${encodeURIComponent(conversationId)}`,
-        { headers: this.pendingRefsApiHeaders(), timeout: 10000 },
-      );
-    } catch (error: any) {
-      this.logLine(
-        'Failed to remove pending ref from Laravel',
-        { conversation_id: conversationId, message: error.message },
-        'ERROR',
-      );
-    }
+    await Promise.all(
+      this.pendingRefTargets().map(async (target) => {
+        try {
+          await axios.delete(
+            `${this.pendingRefsApiBase(target)}/${encodeURIComponent(conversationId)}`,
+            {
+              headers: this.pendingRefsApiHeaders(target),
+              timeout: 10000,
+            },
+          );
+        } catch (error: any) {
+          this.logLine(
+            'Failed to remove pending ref from Laravel',
+            {
+              target: target.name,
+              conversation_id: conversationId,
+              message: error.message,
+            },
+            'ERROR',
+          );
+        }
+      }),
+    );
   }
 
   setLeadIndex(conversationId: string, recordId: string) {
@@ -580,7 +634,10 @@ export class WebhookService {
     const ok = await this.syncRefToPancake(conversationId, ref);
 
     if (ok) {
-      await this.removePendingRef(conversationId);
+      // Keep the durable referral long enough for every Laravel target to
+      // consume it. Their webhook jobs are asynchronous and can run after the
+      // Pancake update succeeds. cleanOldPendingRefs() removes stale rows.
+      this.clearPendingRefRetries(conversationId);
     } else {
       this.schedulePendingRefRetries(conversationId);
     }
@@ -601,7 +658,6 @@ export class WebhookService {
     const ok = await this.syncRefToPancake(conversationId, String(pending.ref));
 
     if (ok) {
-      await this.removePendingRef(conversationId);
       this.clearPendingRefRetries(conversationId);
     } else {
       this.schedulePendingRefRetries(conversationId);
@@ -655,10 +711,14 @@ export class WebhookService {
 
     this.pendingRetryTimers.set(conversationId, timers);
 
-    this.logLine('Scheduled pending ref retries', {
-      conversation_id: conversationId,
-      delays_ms: this.pendingRetryDelays,
-    }, 'DEBUG');
+    this.logLine(
+      'Scheduled pending ref retries',
+      {
+        conversation_id: conversationId,
+        delays_ms: this.pendingRetryDelays,
+      },
+      'DEBUG',
+    );
   }
 
   private pancakeUrl(apiPath: string, query: Record<string, any> = {}) {
@@ -829,11 +889,15 @@ export class WebhookService {
     if (ok) {
       this.updateLocalPancakeRecordRef(conversationId, ref);
 
-      this.logLine('Ref synced', {
-        conversation_id: conversationId,
-        record_id: recordId,
-        ref,
-      }, 'DEBUG');
+      this.logLine(
+        'Ref synced',
+        {
+          conversation_id: conversationId,
+          record_id: recordId,
+          ref,
+        },
+        'DEBUG',
+      );
 
       this.logger.log(
         `Ref synced to Pancake CRM conversation_id=${conversationId} record_id=${recordId} ref=${ref}`,
@@ -968,9 +1032,7 @@ export class WebhookService {
     record.ref = pending.ref;
 
     const ok = await this.syncRefToPancake(pending.conversationId, pending.ref);
-    if (ok) {
-      await this.removePendingRef(pending.conversationId);
-    }
+    if (ok) this.clearPendingRefRetries(pending.conversationId);
   }
 
   async savePancakeRecord(record: any) {
@@ -1137,12 +1199,16 @@ export class WebhookService {
         timeout: 10000,
       });
 
-      this.logLine('Forwarded Pancake record to Laravel', {
-        pancake_id: record.id ?? null,
-        action,
-        has_ref: !!payload.lead.ref,
-        ref: payload.lead.ref || null,
-      }, 'DEBUG');
+      this.logLine(
+        'Forwarded Pancake record to Laravel',
+        {
+          pancake_id: record.id ?? null,
+          action,
+          has_ref: !!payload.lead.ref,
+          ref: payload.lead.ref || null,
+        },
+        'DEBUG',
+      );
     } catch (error: any) {
       this.logLine(
         'Forward Pancake record to Laravel failed',
@@ -1195,7 +1261,6 @@ export class WebhookService {
           );
 
           if (ok) {
-            await this.removePendingRef(conversationId);
             message = `Dong bo thanh cong: ${conversationId}`;
           } else {
             message = `Dong bo that bai: ${conversationId}`;
@@ -1220,7 +1285,6 @@ export class WebhookService {
         );
 
         if (ok) {
-          await this.removePendingRef(conversationId);
           success++;
         } else {
           failed++;
