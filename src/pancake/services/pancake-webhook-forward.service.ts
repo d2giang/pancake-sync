@@ -19,7 +19,12 @@ export class PancakeWebhookForwardService {
    */
   async forwardToLaravel(payload: Record<string, any>): Promise<boolean> {
     const targets = getLaravelTargets().filter((target) => target.webhookUrl);
-    return this.postToTargets(targets, 'webhookUrl', payload, 'LARAVEL_WEBHOOK_URL');
+    return this.postToTargets(
+      targets,
+      'webhookUrl',
+      payload,
+      'LARAVEL_WEBHOOK_URL',
+    );
   }
 
   /**
@@ -81,29 +86,33 @@ export class PancakeWebhookForwardService {
     const timeout = getLaravelWebhookTimeout();
     const maxRetries = getLaravelWebhookRetryCount();
     const retryDelayMs = getLaravelWebhookRetryDelay();
-    const idempotencyKey = payload.idempotency_key || null;
+    const rawIdempotencyKey: unknown = payload.idempotency_key;
+    const idempotencyKey =
+      typeof rawIdempotencyKey === 'string' && rawIdempotencyKey
+        ? rawIdempotencyKey
+        : null;
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Webhook-Secret': secret,
+      ...(idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {}),
+    };
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        await axios.post(url, payload, {
-          timeout,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Webhook-Secret': secret,
-            ...(idempotencyKey
-              ? { 'X-Idempotency-Key': idempotencyKey }
-              : {}),
-          },
-        });
+        await axios.post(url, payload, { timeout, headers });
 
         return true;
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const axiosError = axios.isAxiosError(error) ? error : null;
+        const errorCode = axiosError?.code;
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         const isNetworkError =
-          error.code === 'ECONNREFUSED' ||
-          error.code === 'ECONNRESET' ||
-          error.code === 'ETIMEDOUT' ||
-          error.code === 'ENOTFOUND' ||
-          error.code === 'EPIPE';
+          errorCode === 'ECONNREFUSED' ||
+          errorCode === 'ECONNRESET' ||
+          errorCode === 'ETIMEDOUT' ||
+          errorCode === 'ENOTFOUND' ||
+          errorCode === 'EPIPE';
 
         if (isNetworkError && attempt < maxRetries) {
           this.logger.warn(
@@ -114,11 +123,42 @@ export class PancakeWebhookForwardService {
         }
 
         // Log non-network errors once
-        const status = error.response?.status;
-        const responseData = error.response?.data;
+        const status = axiosError?.response?.status;
+        const responseData: unknown = axiosError?.response?.data;
+
+        // Nhiều deployment chỉ cấu hình domain/base URL hoặc route webhook cũ.
+        // Khi URL đó 404, thử đúng route Laravel hiện tại một lần. Không
+        // fallback cho 401/403/500 vì đó là lỗi secret hoặc code phía Laravel.
+        if (status === 404) {
+          const canonicalUrl = this.canonicalWebhookUrl(url);
+          if (canonicalUrl && canonicalUrl !== url) {
+            try {
+              await axios.post(canonicalUrl, payload, { timeout, headers });
+              this.logger.warn(
+                `${envVarName} returned 404; forwarded successfully via ${canonicalUrl}. ` +
+                  `Update the configured webhook URL.`,
+              );
+              return true;
+            } catch (fallbackError: unknown) {
+              const fallbackAxiosError = axios.isAxiosError(fallbackError)
+                ? fallbackError
+                : null;
+              const fallbackMessage =
+                fallbackError instanceof Error
+                  ? fallbackError.message
+                  : String(fallbackError);
+              this.logger.error(
+                `${envVarName} canonical webhook fallback failed: ${fallbackMessage}` +
+                  (fallbackAxiosError?.response?.status
+                    ? ` [HTTP ${fallbackAxiosError.response.status}]`
+                    : ''),
+              );
+            }
+          }
+        }
 
         this.logger.error(
-          `Forward to Laravel failed: ${error.message}` +
+          `${envVarName} forward failed: ${errorMessage}` +
             (status ? ` [HTTP ${status}]` : '') +
             (responseData ? ` ${JSON.stringify(responseData)}` : ''),
         );
@@ -128,5 +168,17 @@ export class PancakeWebhookForwardService {
     }
 
     return false;
+  }
+
+  private canonicalWebhookUrl(configuredUrl: string): string | null {
+    try {
+      const parsed = new URL(configuredUrl);
+      parsed.pathname = '/api/webhooks/pancake';
+      parsed.search = '';
+      parsed.hash = '';
+      return parsed.toString();
+    } catch {
+      return null;
+    }
   }
 }
