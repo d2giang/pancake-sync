@@ -96,6 +96,11 @@ export class TikTokMessagePollingScheduler {
         if (!messageId || this.seenMessageIds.has(dedupeKey)) continue;
         this.remember(dedupeKey);
 
+        // Endpoint messages trả cả lịch sử gần nhất. Chỉ forward message
+        // thực sự mới trong cửa sổ poll; nếu không, mỗi lần deploy/
+        // restart sẽ replay 10 tin cũ và tạo thông báo giả trên CRM.
+        if (!this.isNewerThan(message, updatedSince)) continue;
+
         await processPancakeMessagingWebhook(
           {
             pageId,
@@ -104,6 +109,7 @@ export class TikTokMessagePollingScheduler {
             conversation,
             message,
             receivedAt: new Date().toISOString(),
+            emitRealtime: false,
           },
           {
             forwardService: this.forwardService,
@@ -122,5 +128,22 @@ export class TikTokMessagePollingScheduler {
     if (this.seenMessageIds.size <= 5000) return;
     const oldest: string | undefined = Array.from(this.seenMessageIds)[0];
     if (oldest) this.seenMessageIds.delete(oldest);
+  }
+
+  private isNewerThan(message: PancakeMessage, cutoff: string): boolean {
+    const createdTime: unknown = message.created_time;
+    const insertedAt: unknown = message.inserted_at;
+    const updatedAt: unknown = message.updated_at;
+    const rawTimestamp = createdTime || insertedAt || updatedAt;
+    if (typeof rawTimestamp !== 'string' && typeof rawTimestamp !== 'number') {
+      return false;
+    }
+    const timestamp = Date.parse(String(rawTimestamp));
+    const cutoffTimestamp = Date.parse(cutoff);
+    return (
+      Number.isFinite(timestamp) &&
+      Number.isFinite(cutoffTimestamp) &&
+      timestamp > cutoffTimestamp
+    );
   }
 }

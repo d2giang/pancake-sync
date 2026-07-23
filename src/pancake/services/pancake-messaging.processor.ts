@@ -26,6 +26,9 @@ export interface MessagingWebhookJob {
   conversation: PancakeConversation;
   message: PancakeMessage;
   receivedAt: string;
+  // Polling không biết Laravel insert mới hay dedup bản ghi cũ. Khi false,
+  // chỉ Laravel (nơi có wasRecentlyCreated) được phát socket realtime.
+  emitRealtime?: boolean;
 }
 
 export interface MessagingProcessorDependencies {
@@ -42,7 +45,14 @@ export async function processPancakeMessagingWebhook(
   deps: MessagingProcessorDependencies,
 ): Promise<void> {
   const startedAt = Date.now();
-  const { pageId, conversationId, conversation, message, receivedAt } = job;
+  const {
+    pageId,
+    conversationId,
+    conversation,
+    message,
+    receivedAt,
+    emitRealtime = true,
+  } = job;
   const { forwardService, cache, realtimeService, stats, logger } = deps;
 
   let convOk: boolean | null = null;
@@ -63,10 +73,14 @@ export async function processPancakeMessagingWebhook(
           raw_message: message,
         });
       }
-    } catch (cacheError: any) {
+    } catch (cacheError: unknown) {
+      const cacheMessage =
+        cacheError instanceof Error ? cacheError.message : String(cacheError);
+      const cacheStack =
+        cacheError instanceof Error ? cacheError.stack : undefined;
       logger.error(
-        `Local cache write failed for conversation_id=${conversationId}: ${cacheError?.message}`,
-        cacheError?.stack,
+        `Local cache write failed for conversation_id=${conversationId}: ${cacheMessage}`,
+        cacheStack,
       );
     }
 
@@ -96,7 +110,7 @@ export async function processPancakeMessagingWebhook(
       });
       msgDurationMs = Date.now() - msgStartedAt;
 
-      if (convOk && msgOk) {
+      if (convOk && msgOk && emitRealtime) {
         const messageId = String(normalizedMessage?.message_id || '');
         realtimeService.emitMessageCreated({
           page_id: pageId,
@@ -111,17 +125,19 @@ export async function processPancakeMessagingWebhook(
           timestamp: occurredAt,
           source: 'pancake',
         });
-      } else {
+      } else if (!convOk || !msgOk) {
         logger.warn(
           `Laravel forward incomplete for conversation_id=${conversationId}: ` +
             `conversation_saved=${convOk} message_saved=${msgOk} — realtime emit skipped`,
         );
       }
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
     logger.error(
-      `Messaging webhook processing failed for conversation_id=${conversationId}: ${error?.message}`,
-      error?.stack,
+      `Messaging webhook processing failed for conversation_id=${conversationId}: ${errorMessage}`,
+      errorStack,
     );
   } finally {
     const totalMs = Date.now() - startedAt;

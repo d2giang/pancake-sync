@@ -8,7 +8,7 @@ describe('TikTokMessagePollingScheduler', () => {
     jest.restoreAllMocks();
   });
 
-  it('forwards a polled TikTok message once and emits realtime', async () => {
+  it('forwards a polled TikTok message once without emitting duplicate Nest realtime', async () => {
     process.env.PANCAKE_PAGES = JSON.stringify([
       { id: 'ttm_page', platform: 'tiktok', token: 'token' },
     ]);
@@ -26,7 +26,7 @@ describe('TikTokMessagePollingScheduler', () => {
             message_id: 'message-1',
             from: { id: 'customer-1', name: 'Customer' },
             message: 'Xin chào',
-            inserted_at: '2026-07-23T02:00:00Z',
+            inserted_at: new Date().toISOString(),
           },
         ],
       }),
@@ -50,13 +50,6 @@ describe('TikTokMessagePollingScheduler', () => {
     await scheduler.poll();
 
     expect(forwardService.forwardToLaravel).toHaveBeenCalledTimes(2);
-    expect(realtime.emitMessageCreated).toHaveBeenCalledTimes(1);
-    expect(realtime.emitMessageCreated).toHaveBeenCalledWith(
-      expect.objectContaining({
-        page_id: 'ttm_page',
-        conversation_id: 'conversation-1',
-        message_id: 'message-1',
-      }),
-    );
+    expect(realtime.emitMessageCreated).not.toHaveBeenCalled();
   });
 });
