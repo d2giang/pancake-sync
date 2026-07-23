@@ -19,6 +19,7 @@ import { MessagingStatsService } from './services/messaging-stats.service';
 // Schedulers
 import { ConversationSyncScheduler } from './schedulers/conversation-sync.scheduler';
 import { NoResponseScheduler } from './schedulers/no-response.scheduler';
+import { TikTokMessagePollingScheduler } from './schedulers/tiktok-message-polling.scheduler';
 
 @Module({
   imports: [ScheduleModule.forRoot(), RealtimeModule],
@@ -32,6 +33,7 @@ import { NoResponseScheduler } from './schedulers/no-response.scheduler';
     NoResponseDetectorService,
     ConversationSyncScheduler,
     NoResponseScheduler,
+    TikTokMessagePollingScheduler,
     MessagingStatsService,
   ],
   exports: [
